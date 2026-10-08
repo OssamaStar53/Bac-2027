@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { SupportSession, BacStream, AppNotification } from '../types';
+import { api } from '../api';
 import { 
   Send, 
   MessageSquare, 
@@ -73,9 +74,23 @@ export const CommunicationCenter: React.FC<CommunicationCenterProps> = ({
     window.open(`https://wa.me/?text=${encoded}`, '_blank');
   };
 
-  const handleSendTelegram = () => {
-    const encoded = encodeURIComponent(messageText);
-    window.open(`https://t.me/share/url?url=&text=${encoded}`, '_blank');
+  const [telegramStatus, setTelegramStatus] = useState<string | null>(null);
+
+  const handleSendTelegram = async () => {
+    setTelegramStatus('جارٍ البث...');
+    const res = await api.broadcastTelegram(messageText);
+    if (res.success) {
+      setTelegramStatus('تم بث الإعلان للقناة بنجاح!');
+      setTimeout(() => setTelegramStatus(null), 3500);
+    } else {
+      setTelegramStatus(null);
+      const encoded = encodeURIComponent(messageText);
+      const a = document.createElement('a');
+      a.href = `https://t.me/share/url?url=&text=${encoded}`;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.click();
+    }
   };
 
   const handleSendInApp = () => {
@@ -176,7 +191,7 @@ export const CommunicationCenter: React.FC<CommunicationCenterProps> = ({
               className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 px-4 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white rounded-xl text-xs font-bold transition-colors shadow-xs cursor-pointer"
             >
               <Send className="w-4 h-4" />
-              <span>مشاركة عبر Telegram</span>
+              <span>{telegramStatus || 'بث عبر Telegram'}</span>
             </button>
 
             {/* In-App Notification */}

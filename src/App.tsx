@@ -58,15 +58,31 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_ADMIN_USER;
   });
 
+  // Legacy demo IDs filter helper to prevent resurrected demo accounts from old browser localStorage cache
+  const DEMO_STUDENT_IDS = new Set(['std-001', 'std-002', 'std-003', 'std-004', 'std-005', 'std-006', 'std-007']);
+  const DEMO_TEACHER_IDS = new Set(['tch-001', 'tch-002', 'tch-003', 'tch-004']);
+
   // Persistent state with localStorage fallbacks
   const [students, setStudents] = useState<Student[]>(() => {
     const saved = localStorage.getItem('badhra_students');
-    return saved ? JSON.parse(saved) : INITIAL_STUDENTS;
+    if (!saved) return INITIAL_STUDENTS;
+    try {
+      const parsed: Student[] = JSON.parse(saved);
+      return parsed.filter(s => !DEMO_STUDENT_IDS.has(s.id));
+    } catch {
+      return INITIAL_STUDENTS;
+    }
   });
 
   const [teachers, setTeachers] = useState<Teacher[]>(() => {
     const saved = localStorage.getItem('badhra_teachers');
-    return saved ? JSON.parse(saved) : INITIAL_TEACHERS;
+    if (!saved) return INITIAL_TEACHERS;
+    try {
+      const parsed: Teacher[] = JSON.parse(saved);
+      return parsed.filter(t => !DEMO_TEACHER_IDS.has(t.id));
+    } catch {
+      return INITIAL_TEACHERS;
+    }
   });
 
   const [sessions, setSessions] = useState<SupportSession[]>(() => {
@@ -125,12 +141,31 @@ export default function App() {
   useEffect(() => {
     api.getFullData().then((serverData) => {
       if (serverData) {
-        if (serverData.siteSettings) setSiteSettings(serverData.siteSettings);
+        if (serverData.siteSettings) {
+          setSiteSettings((prev) => {
+            const hasRealToken = prev.telegramBotToken && !prev.telegramBotToken.includes('Sample') && prev.telegramBotToken.length > 15;
+            const serverHasSample = serverData.siteSettings.telegramBotToken?.includes('Sample');
+            if (hasRealToken && serverHasSample) {
+              const merged = {
+                ...serverData.siteSettings,
+                telegramBotToken: prev.telegramBotToken,
+                telegramChatId: prev.telegramChatId || serverData.siteSettings.telegramChatId,
+              };
+              api.saveSiteSettings(merged);
+              return merged;
+            }
+            return serverData.siteSettings;
+          });
+        }
         if (serverData.adminUser) setAdminUser(serverData.adminUser);
-        if (serverData.students && serverData.students.length > 0) setStudents(serverData.students);
-        if (serverData.teachers && serverData.teachers.length > 0) setTeachers(serverData.teachers);
-        if (serverData.sessions && serverData.sessions.length > 0) setSessions(serverData.sessions);
-        if (serverData.activityLogs) setActivityLogs(serverData.activityLogs);
+        if (Array.isArray(serverData.students)) {
+          setStudents(serverData.students.filter(s => !DEMO_STUDENT_IDS.has(s.id)));
+        }
+        if (Array.isArray(serverData.teachers)) {
+          setTeachers(serverData.teachers.filter(t => !DEMO_TEACHER_IDS.has(t.id)));
+        }
+        if (Array.isArray(serverData.sessions)) setSessions(serverData.sessions);
+        if (Array.isArray(serverData.activityLogs)) setActivityLogs(serverData.activityLogs);
       }
     });
   }, []);
@@ -437,17 +472,7 @@ export default function App() {
         `🔗 *رابط المنصة:* https://badhrat-ghad.dz`;
 
       if (isRealToken && chatId) {
-        try {
-          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text: tgText,
-              parse_mode: 'Markdown',
-            }),
-          });
-        } catch (e) {}
+        api.broadcastTelegram(tgText).catch(() => {});
       }
 
       showToast(`تمت برمجة حصة ${newSession.subject} ونشرها تلقائياً على قناة التليجرام!`);

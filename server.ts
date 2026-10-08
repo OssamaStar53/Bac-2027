@@ -1,17 +1,17 @@
-import express, { Request, Response } from 'express';
+import express, { type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { db as pgDb } from './src/db/index.ts';
 import * as schema from './src/db/schema.ts';
 import { eq } from 'drizzle-orm';
-import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
+import { requireAuth, type AuthRequest } from './src/middleware/auth.ts';
 import { getOrCreateUser, getUsers } from './src/db/users.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const DB_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DB_DIR, 'database.json');
 
@@ -48,9 +48,35 @@ let isCloudSqlSeeded = false;
 async function ensureCloudSqlSeeded() {
   if (isCloudSqlSeeded || !process.env.SQL_HOST) return;
   try {
+    const dbData = loadDatabase();
+    
+    // Seed site settings if empty in Cloud SQL
+    try {
+      const existingSettings = await pgDb.select().from(schema.siteSettingsTable).where(eq(schema.siteSettingsTable.id, 1));
+      if (existingSettings.length === 0 && dbData?.siteSettings) {
+        await pgDb.insert(schema.siteSettingsTable).values({
+          id: 1,
+          settings: dbData.siteSettings,
+        }).onConflictDoNothing();
+      }
+    } catch (e) {
+      console.warn('Could not check or seed site_settings table:', e);
+    }
+
+    // Purge legacy demo accounts from Cloud SQL if present
+    try {
+      const DEMO_STUDENT_IDS = ['std-001', 'std-002', 'std-003', 'std-004', 'std-005', 'std-006', 'std-007'];
+      const DEMO_TEACHER_IDS = ['tch-001', 'tch-002', 'tch-003', 'tch-004', 'tch-005'];
+      for (const id of DEMO_STUDENT_IDS) {
+        await pgDb.delete(schema.students).where(eq(schema.students.id, id));
+      }
+      for (const id of DEMO_TEACHER_IDS) {
+        await pgDb.delete(schema.teachers).where(eq(schema.teachers.id, id));
+      }
+    } catch (e) {}
+
     const existing = await pgDb.select().from(schema.students).limit(1);
     if (existing.length === 0) {
-      const dbData = loadDatabase();
       if (dbData) {
         if (dbData.students && dbData.students.length > 0) {
           for (const s of dbData.students) {
@@ -127,6 +153,54 @@ async function ensureCloudSqlSeeded() {
   }
 }
 
+// Server-side Telegram Message Dispatcher (no CORS, direct server-to-Telegram)
+async function sendTelegramServerMessage(text: string): Promise<{ ok: boolean; description?: string; result?: any }> {
+  try {
+    let token = '';
+    let chatId = '';
+
+    if (process.env.SQL_HOST) {
+      try {
+        const [saved] = await pgDb.select().from(schema.siteSettingsTable).where(eq(schema.siteSettingsTable.id, 1));
+        if (saved?.settings) {
+          const s = saved.settings as any;
+          if (s.telegramBotEnabled) {
+            token = s.telegramBotToken?.trim();
+            chatId = s.telegramChatId?.trim();
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!token) {
+      const db = loadDatabase();
+      if (db?.siteSettings?.telegramBotEnabled) {
+        token = db.siteSettings.telegramBotToken?.trim();
+        chatId = db.siteSettings.telegramChatId?.trim();
+      }
+    }
+
+    if (!token || !chatId || token.includes('Sample')) {
+      return { ok: false, description: 'إعدادات تليجرام غير مهيأة أو التوكن تجريبي' };
+    }
+
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'Markdown',
+      }),
+    });
+    const data = await res.json();
+    return { ok: !!data.ok, description: data.description, result: data.result };
+  } catch (err: any) {
+    console.error('Error dispatching telegram message from server:', err);
+    return { ok: false, description: err.message };
+  }
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '20mb' }));
@@ -176,13 +250,62 @@ async function startServer() {
     }
   });
 
-  // GET full database for cross-device sync
+  // GET full database for cross-device sync & persistent Cloud SQL data
   app.get('/api/data', async (_req: Request, res: Response) => {
     await ensureCloudSqlSeeded();
-    const db = loadDatabase();
-    if (!db) {
-      return res.status(500).json({ error: 'Database not initialized' });
+    const db = loadDatabase() || {};
+
+    if (process.env.SQL_HOST) {
+      try {
+        // 1. Load persistent siteSettings from Cloud SQL
+        const [savedSettings] = await pgDb
+          .select()
+          .from(schema.siteSettingsTable)
+          .where(eq(schema.siteSettingsTable.id, 1));
+        if (savedSettings?.settings) {
+          db.siteSettings = { ...db.siteSettings, ...(savedSettings.settings as any) };
+        }
+
+        // 2. Load students from Cloud SQL
+        const sqlStudents = await pgDb.select().from(schema.students);
+        if (sqlStudents && sqlStudents.length > 0) {
+          db.students = sqlStudents;
+        }
+
+        // 3. Load teachers from Cloud SQL
+        const sqlTeachers = await pgDb.select().from(schema.teachers);
+        if (sqlTeachers && sqlTeachers.length > 0) {
+          db.teachers = sqlTeachers;
+        }
+
+        // 4. Load sessions from Cloud SQL
+        const sqlSessions = await pgDb.select().from(schema.supportSessions);
+        if (sqlSessions && sqlSessions.length > 0) {
+          db.sessions = sqlSessions;
+        }
+
+        // 5. Load resources from Cloud SQL
+        const sqlResources = await pgDb.select().from(schema.studyResources);
+        if (sqlResources && sqlResources.length > 0) {
+          db.resources = sqlResources;
+        }
+
+        // 6. Load quizzes from Cloud SQL
+        const sqlQuizzes = await pgDb.select().from(schema.quizzes);
+        if (sqlQuizzes && sqlQuizzes.length > 0) {
+          db.quizzes = sqlQuizzes;
+        }
+
+        // 7. Load activity logs from Cloud SQL
+        const sqlLogs = await pgDb.select().from(schema.adminActivityLogs);
+        if (sqlLogs && sqlLogs.length > 0) {
+          db.activityLogs = sqlLogs;
+        }
+      } catch (err) {
+        console.error('Error fetching persistent data from Cloud SQL, using file cache:', err);
+      }
     }
+
     res.json(db);
   });
 
@@ -482,6 +605,255 @@ async function startServer() {
     }
 
     res.json({ success: true, siteSettings: db.siteSettings });
+  });
+
+  // GET Site Settings (persisted from Cloud SQL if available, fallback to file)
+  app.get('/api/admin/settings', async (_req: Request, res: Response) => {
+    let settings = null;
+    if (process.env.SQL_HOST) {
+      try {
+        const [saved] = await pgDb
+          .select()
+          .from(schema.siteSettingsTable)
+          .where(eq(schema.siteSettingsTable.id, 1));
+        if (saved?.settings) {
+          settings = saved.settings;
+        }
+      } catch (err) {
+        console.error('Error fetching settings from Cloud SQL:', err);
+      }
+    }
+    if (!settings) {
+      const db = loadDatabase();
+      settings = db?.siteSettings;
+    }
+    res.json({ success: true, siteSettings: settings });
+  });
+
+  // ===================== TELEGRAM BOT INTEGRATION ENDPOINTS =====================
+  // POST Verify Telegram Bot Token via getMe
+  app.post('/api/telegram/verify-bot', async (req: Request, res: Response) => {
+    try {
+      let { token } = req.body;
+      if (!token) {
+        const db = loadDatabase();
+        token = db?.siteSettings?.telegramBotToken;
+      }
+      token = token?.trim();
+
+      if (!token || token.length < 15 || !token.includes(':')) {
+        return res.status(400).json({
+          success: false,
+          error: 'توكن البوت غير صالح أو قصير جداً',
+          hint: 'تأكد من نسخ كود التوكن كاملاً من @BotFather بالشكل 123456789:ABCDefgh...',
+        });
+      }
+
+      const tgRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+      const data = await tgRes.json();
+
+      if (!data.ok) {
+        return res.status(400).json({
+          success: false,
+          error: data.description || 'فشل التحقق من التوكن',
+          hint: 'التوكن غير صحيح، يرجى إعادة إنشائه أو التأكد منه في @BotFather.',
+          errorCode: data.error_code,
+        });
+      }
+
+      res.json({
+        success: true,
+        bot: data.result,
+        message: `تم التحقق بنجاح من البوت: @${data.result.username} (${data.result.first_name})`,
+      });
+    } catch (err: any) {
+      console.error('Error verifying telegram bot token:', err);
+      res.status(500).json({ success: false, error: 'تعذر الاتصال بخوادم تيليجرام من السيرفر', details: err.message });
+    }
+  });
+
+  // POST Test Connection to Telegram Channel / Group
+  app.post('/api/telegram/test-connection', async (req: Request, res: Response) => {
+    try {
+      let { token, chatId, text } = req.body;
+      const db = loadDatabase();
+
+      if (!token) token = db?.siteSettings?.telegramBotToken;
+      if (!chatId) chatId = db?.siteSettings?.telegramChatId;
+
+      token = token?.trim();
+      chatId = chatId?.trim();
+
+      if (!token || token.includes('Sample')) {
+        return res.status(400).json({
+          success: false,
+          error: 'يرجى إدخال توكن البوت الحقيقي (Bot Token)',
+          hint: 'أنشئ بوتاً جديداً عبر @BotFather في تيليجرام وانسخ التوكن.',
+        });
+      }
+      if (!chatId) {
+        return res.status(400).json({
+          success: false,
+          error: 'يرجى إدخال معرّف القناة أو المجموعة (Chat ID)',
+          hint: 'مثال للقناة العامة: @my_channel_name أو معرف رقمي مثل -100123456789.',
+        });
+      }
+
+      // 1. Check getMe first
+      const meRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+      const meData = await meRes.json();
+      if (!meData.ok) {
+        return res.status(400).json({
+          success: false,
+          error: `خطأ في التوكن: ${meData.description || 'التوكن غير صالح'}`,
+          hint: 'تأكد من نسخ كود التوكن بالكامل وبدقة من @BotFather.',
+        });
+      }
+
+      // 2. Dispatch message
+      const testText = text || `🔔 *تجربة اتصال ناجحة*\n\nتم ربط بوت التيليجرام (@${meData.result.username}) بنجاح مع منصة «${db?.siteSettings?.siteName || 'بذرة غد'}»!\n\n📅 التاريخ: ${new Date().toLocaleString('ar-DZ')}\n✨ البوت جاهز الآن لنشر الحصص والإعلانات تلقائياً.`;
+
+      const sendRes = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: testText,
+          parse_mode: 'Markdown',
+        }),
+      });
+      const sendData = await sendRes.json();
+
+      if (!sendData.ok) {
+        let hint = '';
+        const desc = (sendData.description || '').toLowerCase();
+        if (desc.includes('chat not found')) {
+          hint = 'لم يتم العثور على القناة أو المحادثة. تأكد مما يلي:\n1. إذا كانت القناة عامة: اكتب المعرف مع @ (مثال: @my_channel).\n2. تأكد من إضافة البوت كمشرف (Admin) داخل القناة مع صلاحية نشر الرسائل (Post Messages).\n3. إذا كانت محادثة خاصة، افتح البوت واضغط /start أولاً.';
+        } else if (desc.includes('bot was blocked') || desc.includes('bot can\'t initiate conversation')) {
+          hint = 'إذا كنت ترسل لحسابك الشخصي، يجب فتح البوت في تيليجرام والضغط على Start أو /start أولاً.';
+        } else if (desc.includes('not enough rights') || desc.includes('rights')) {
+          hint = 'البوت موجود في القناة ولكن لا يمتلك صلاحية نشر الرسائل (Post Messages). يرجى ترقيته إلى مشرف (Admin).';
+        } else {
+          hint = 'تأكد من إضافة البوت مشرفاً في القناة أو صحة معرف المحادثة.';
+        }
+
+        return res.status(400).json({
+          success: false,
+          error: sendData.description || 'فشل إرسال الرسالة إلى القناة',
+          hint,
+          bot: meData.result,
+        });
+      }
+
+      // Save activity log
+      const logItem = {
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+        action: 'اختبار اتصال بوت تليجرام',
+        details: `تم إرسال رسالة تجريبية بنجاح إلى ${chatId} عبر @${meData.result.username}`,
+        category: 'telegram',
+      };
+      if (db) {
+        if (!db.activityLogs) db.activityLogs = [];
+        db.activityLogs.unshift(logItem);
+        saveDatabase(db);
+      }
+      if (process.env.SQL_HOST) {
+        try {
+          await pgDb.insert(schema.adminActivityLogs).values(logItem).onConflictDoNothing();
+        } catch (e) {}
+      }
+
+      res.json({
+        success: true,
+        bot: meData.result,
+        messageId: sendData.result?.message_id,
+        chat: sendData.result?.chat,
+        message: `تم إرسال الرسالة التجريبية بنجاح إلى ${chatId}! البوت يعمل بشكل ممتاز.`,
+      });
+    } catch (err: any) {
+      console.error('Error testing telegram connection:', err);
+      res.status(500).json({ success: false, error: 'خطأ في الاتصال بالتيليجرام من الخادم', details: err.message });
+    }
+  });
+
+  // POST Broadcast message to Telegram Channel / Group
+  app.post('/api/telegram/broadcast', async (req: Request, res: Response) => {
+    try {
+      const { text, parseMode = 'Markdown' } = req.body;
+      if (!text || !text.trim()) {
+        return res.status(400).json({ error: 'نص الإعلان مطلوب' });
+      }
+
+      const db = loadDatabase();
+      let token = db?.siteSettings?.telegramBotToken?.trim();
+      let chatId = db?.siteSettings?.telegramChatId?.trim();
+
+      if (process.env.SQL_HOST) {
+        try {
+          const [saved] = await pgDb.select().from(schema.siteSettingsTable).where(eq(schema.siteSettingsTable.id, 1));
+          if (saved?.settings) {
+            const s = saved.settings as any;
+            if (s.telegramBotToken) token = s.telegramBotToken.trim();
+            if (s.telegramChatId) chatId = s.telegramChatId.trim();
+          }
+        } catch (e) {}
+      }
+
+      if (!token || !chatId || token.includes('Sample')) {
+        return res.status(400).json({ 
+          error: 'إعدادات التيليجرام غير مكتملة بعد. يرجى إدخال التوكن ومعرف القناة من لوحة التحكم.' 
+        });
+      }
+
+      const sendRes = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: text.trim(),
+          parse_mode: parseMode,
+        }),
+      });
+      const data = await sendRes.json();
+
+      if (!data.ok) {
+        let hint = 'تحقق من معرف القناة وإضافة البوت مشرفاً فيها.';
+        const desc = (data.description || '').toLowerCase();
+        if (desc.includes('chat not found')) {
+          hint = 'لم يتم العثور على القناة. تأكد من كتابة المعرف مع @ والتأكد من إضافة البوت مشرفاً.';
+        }
+        return res.status(400).json({ 
+          error: data.description || 'فشل بث الرسالة في تيليجرام',
+          hint,
+          details: data
+        });
+      }
+
+      // Record activity log
+      const logItem = {
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+        action: 'بث إعلان في تليجرام',
+        details: `بث: "${text.slice(0, 45)}..." إلى ${chatId}`,
+        category: 'telegram',
+      };
+      if (db) {
+        if (!db.activityLogs) db.activityLogs = [];
+        db.activityLogs.unshift(logItem);
+        saveDatabase(db);
+      }
+      if (process.env.SQL_HOST) {
+        try {
+          await pgDb.insert(schema.adminActivityLogs).values(logItem).onConflictDoNothing();
+        } catch (e) {}
+      }
+
+      res.json({ success: true, messageId: data.result?.message_id, text: text.trim() });
+    } catch (err: any) {
+      console.error('Telegram broadcast error:', err);
+      res.status(500).json({ error: 'خطأ في الاتصال بالتيليجرام من الخادم' });
+    }
   });
 
   // ===================== STUDENTS MANAGEMENT =====================

@@ -101,12 +101,57 @@ export const api = {
   // Save Site Settings
   async saveSiteSettings(settings: SiteSettings) {
     try {
-      await fetch('/api/admin/settings', {
+      const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
-    } catch (e) {}
+      return await res.json();
+    } catch (e) {
+      return { success: false };
+    }
+  },
+
+  // Telegram verify bot token
+  async verifyTelegramBot(token?: string): Promise<{ success: boolean; bot?: any; error?: string; hint?: string; message?: string }> {
+    try {
+      const res = await fetch('/api/telegram/verify-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, error: 'تعذر الاتصال بالسيرفر لفحص البوت' };
+    }
+  },
+
+  // Telegram test connection (token + chatId)
+  async testTelegramConnection(token: string, chatId: string, text?: string): Promise<{ success: boolean; bot?: any; messageId?: number; error?: string; hint?: string; message?: string }> {
+    try {
+      const res = await fetch('/api/telegram/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, chatId, text }),
+      });
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, error: 'تعذر الاتصال بالسيرفر' };
+    }
+  },
+
+  // Telegram broadcast
+  async broadcastTelegram(text: string): Promise<{ success: boolean; messageId?: number; error?: string; hint?: string }> {
+    try {
+      const res = await fetch('/api/telegram/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      return await res.json();
+    } catch (e: any) {
+      return { success: false, error: 'تعذر الاتصال بالسيرفر' };
+    }
   },
 
   // Save Admin Credentials
@@ -151,6 +196,20 @@ export const api = {
     } catch (e) {}
   },
 
+  // Update Student Password (ADMIN ONLY)
+  async updateStudentPassword(studentId: string, password: string) {
+    try {
+      const res = await fetch(`/api/students/${studentId}/password`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      return await res.json();
+    } catch (e) {
+      return { success: false };
+    }
+  },
+
   // Add Teacher (Admin)
   async addTeacher(teacher: Teacher) {
     try {
@@ -180,6 +239,20 @@ export const api = {
         body: JSON.stringify({ isHidden }),
       });
     } catch (e) {}
+  },
+
+  // Update Teacher Password (ADMIN ONLY)
+  async updateTeacherPassword(teacherId: string, password: string) {
+    try {
+      const res = await fetch(`/api/teachers/${teacherId}/password`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      return await res.json();
+    } catch (e) {
+      return { success: false };
+    }
   },
 
   // Add Session

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { api } from '../api';
 import { 
   Student, 
   Teacher, 
@@ -86,6 +87,8 @@ interface AssociationControlPanelProps {
   onDeleteStudent?: (studentId: string) => void;
   onToggleHideStudent?: (studentId: string, isHidden: boolean) => void;
   onToggleHideSession?: (sessionId: string, isHidden: boolean) => void;
+  onUpdateStudentPassword?: (studentId: string, newPassword: string) => void;
+  onUpdateTeacherPassword?: (teacherId: string, newPassword: string) => void;
 }
 
 const ALL_STREAMS: BacStream[] = [
@@ -123,6 +126,8 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
   onDeleteStudent,
   onToggleHideStudent,
   onToggleHideSession,
+  onUpdateStudentPassword,
+  onUpdateTeacherPassword,
 }) => {
   const [activeTab, setActiveTab] = useState<
     'branding' | 'contact' | 'telegram' | 'admin_security' | 'activity_log' | 'sessions' | 'teachers' | 'students' | 'backup' | 'pdf_resources'
@@ -134,6 +139,9 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
   const [passwordError, setPasswordError] = useState('');
   const [telegramTestNotice, setTelegramTestNotice] = useState<string | null>(null);
   const [isSendingTelegram, setIsSendingTelegram] = useState(false);
+  const [isVerifyingBot, setIsVerifyingBot] = useState(false);
+  const [botVerificationData, setBotVerificationData] = useState<{ username: string; firstName: string } | null>(null);
+  const [telegramErrorHint, setTelegramErrorHint] = useState<string | null>(null);
   const [copiedInfoNotice, setCopiedInfoNotice] = useState(false);
 
   // Admin PDF Resources State
@@ -278,10 +286,68 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
   const [filterStream, setFilterStream] = useState<string>('all');
   const [activityCategoryFilter, setActivityCategoryFilter] = useState<string>('all');
 
-  // Handle Save Site Settings (Brand, Logo, Announcement, Footer)
-  const handleSaveSettings = (e: React.FormEvent) => {
+  // Passwords Visibility & Management State (ADMIN EXCLUSIVE)
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
+  const [copiedPasswordId, setCopiedPasswordId] = useState<string | null>(null);
+  const [showAdminActivePassword, setShowAdminActivePassword] = useState(false);
+  const [editingPasswordUser, setEditingPasswordUser] = useState<{
+    id: string;
+    name: string;
+    username?: string;
+    role: 'student' | 'teacher';
+    currentPassword?: string;
+  } | null>(null);
+  const [newPasswordForUser, setNewPasswordForUser] = useState('');
+  const [showModalPassword, setShowModalPassword] = useState(true);
+  const [passwordModalNotice, setPasswordModalNotice] = useState<string | null>(null);
+
+  const toggleRevealPassword = (id: string) => {
+    setRevealedPasswords(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleCopyPassword = (id: string, pwd: string) => {
+    navigator.clipboard.writeText(pwd || '123456');
+    setCopiedPasswordId(id);
+    setTimeout(() => setCopiedPasswordId(null), 2000);
+  };
+
+  const openEditPasswordModal = (user: {
+    id: string;
+    name: string;
+    username?: string;
+    role: 'student' | 'teacher';
+    currentPassword?: string;
+  }) => {
+    setEditingPasswordUser(user);
+    setNewPasswordForUser(user.currentPassword || '');
+    setShowModalPassword(true);
+    setPasswordModalNotice(null);
+  };
+
+  const handleSaveUserPasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPasswordUser || !newPasswordForUser.trim()) return;
+    const pwd = newPasswordForUser.trim();
+
+    if (editingPasswordUser.role === 'student' && onUpdateStudentPassword) {
+      onUpdateStudentPassword(editingPasswordUser.id, pwd);
+    } else if (editingPasswordUser.role === 'teacher' && onUpdateTeacherPassword) {
+      onUpdateTeacherPassword(editingPasswordUser.id, pwd);
+    }
+
+    setPasswordModalNotice(`تم تحديث كلمة سر ${editingPasswordUser.role === 'teacher' ? 'الأستاذ' : 'التلميذ'} «${editingPasswordUser.name}» بنجاح!`);
+    setTimeout(() => {
+      setPasswordModalNotice(null);
+      setEditingPasswordUser(null);
+      setNewPasswordForUser('');
+    }, 1400);
+  };
+
+  // Handle Save Site Settings (Brand, Logo, Announcement, Footer, Telegram)
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateSiteSettings(settingsForm);
+    await api.saveSiteSettings(settingsForm);
     setSaveSettingsNotice(true);
     setTimeout(() => setSaveSettingsNotice(false), 2500);
   };
@@ -340,74 +406,107 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
     setTimeout(() => setCopiedInfoNotice(false), 2500);
   };
 
-  // Handle Telegram Bot Test Send (Calls real API if valid token, or simulates cleanly)
+  // Handle Verify Telegram Bot Token via Server
+  const handleVerifyBotToken = async () => {
+    setIsVerifyingBot(true);
+    setTelegramTestNotice(null);
+    setTelegramErrorHint(null);
+
+    const token = settingsForm.telegramBotToken.trim();
+    if (!token) {
+      setTelegramTestNotice('⚠️ يرجى إدخال كود التوكن أولاً من @BotFather');
+      setIsVerifyingBot(false);
+      return;
+    }
+
+    const res = await api.verifyTelegramBot(token);
+    if (res.success && res.bot) {
+      setBotVerificationData({
+        username: res.bot.username,
+        firstName: res.bot.first_name,
+      });
+      setTelegramTestNotice(`🟢 تم التحقق بنجاح! البوت نشط وجاهز: @${res.bot.username} (${res.bot.first_name})`);
+      // Automatically save to Cloud SQL
+      onUpdateSiteSettings(settingsForm);
+      await api.saveSiteSettings(settingsForm);
+    } else {
+      setBotVerificationData(null);
+      setTelegramTestNotice(`❌ خطأ في التوكن: ${res.error || 'غير صالح'}`);
+      setTelegramErrorHint(res.hint || 'تأكد من نسخ كود التوكن بالكامل من @BotFather في تيليجرام.');
+    }
+    setIsVerifyingBot(false);
+  };
+
+  // Handle Telegram Bot Test Send (Calls server proxy - bypasses browser CORS completely)
   const handleSendTelegramTest = async () => {
     setIsSendingTelegram(true);
     setTelegramTestNotice(null);
+    setTelegramErrorHint(null);
 
     const token = settingsForm.telegramBotToken.trim();
     const chatId = settingsForm.telegramChatId.trim();
 
-    // Check if user has set a real-looking token
-    const isRealToken = token.length > 20 && token.includes(':') && !token.includes('Sample');
+    if (!token || token.includes('Sample')) {
+      setTelegramTestNotice('⚠️ يرجى إدخال التوكن الحقيقي للبوت من @BotFather');
+      setIsSendingTelegram(false);
+      return;
+    }
+    if (!chatId) {
+      setTelegramTestNotice('⚠️ يرجى إدخال معرّف القناة أو المجموعة (مثال: @my_channel)');
+      setIsSendingTelegram(false);
+      return;
+    }
 
-    if (isRealToken && chatId) {
-      try {
-        const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: telegramTestMsg,
-            parse_mode: 'Markdown',
-          }),
-        });
-        const resData = await response.json();
-        if (resData.ok) {
-          const logMsg = `[${new Date().toLocaleTimeString('ar-DZ')}] تم إرسال رسالة بنجاح عبر تليجرام إلى ${chatId} (ID: ${resData.result?.message_id})`;
-          setTelegramLogs(prev => [logMsg, ...prev]);
-          setTelegramTestNotice('تم إرسال الرسالة الحقيقية بنجاح إلى قناة التيليجرام!');
-          if (onAddActivityLog) {
-            onAddActivityLog('بث رسالة تلجرام', `تم إرسال رسالة اختبار عبر البوت إلى ${chatId}`, 'telegram');
-          }
-        } else {
-          // Telegram returned error description
-          const logMsg = `[${new Date().toLocaleTimeString('ar-DZ')}] تنبيه تليجرام: ${resData.description || 'فشل الإرسال'}`;
-          setTelegramLogs(prev => [logMsg, ...prev]);
-          setTelegramTestNotice(`تنبيه تليجرام: ${resData.description || 'تحقق من معرف القناة'} (تم توثيق الرسالة محلياً)`);
-        }
-      } catch (err: any) {
-        // Fallback simulation (e.g. sandbox network restrictions or offline)
-        const logMsg = `[${new Date().toLocaleTimeString('ar-DZ')}] محاكاة إرسال إلى ${chatId}: "${telegramTestMsg.slice(0, 45)}..."`;
-        setTelegramLogs(prev => [logMsg, ...prev]);
-        setTelegramTestNotice('تم اختبار البوت وتوثيق الإشعار بنجاح! جاهز للبث الآلي.');
+    // Auto save settings first to ensure persistence
+    onUpdateSiteSettings(settingsForm);
+    await api.saveSiteSettings(settingsForm);
+
+    const res = await api.testTelegramConnection(token, chatId, telegramTestMsg);
+    if (res.success) {
+      const logMsg = `[${new Date().toLocaleTimeString('ar-DZ')}] تم إرسال رسالة تجريبية بنجاح إلى ${chatId} (ID: ${res.messageId || 'ok'})`;
+      setTelegramLogs(prev => [logMsg, ...prev]);
+      setTelegramTestNotice(res.message || `🎉 تم إرسال الرسالة الحقيقية بنجاح إلى ${chatId}!`);
+      if (onAddActivityLog) {
+        onAddActivityLog('بث رسالة تلجرام', `تم إرسال رسالة اختبار عبر البوت إلى ${chatId}`, 'telegram');
       }
     } else {
-      // Simulation mode
-      const logMsg = `[${new Date().toLocaleTimeString('ar-DZ')}] محاكاة البوت النشط (${chatId}): "${telegramTestMsg.slice(0, 45)}..."`;
+      const logMsg = `[${new Date().toLocaleTimeString('ar-DZ')}] تنبيه تليجرام: ${res.error || 'فشل الإرسال'}`;
       setTelegramLogs(prev => [logMsg, ...prev]);
-      setTelegramTestNotice('تمت محاكاة إرسال الرسالة إلى القناة بنجاح! البوت مهيأ بشكل ممتاز.');
-      if (onAddActivityLog) {
-        onAddActivityLog('بث تجريبي تليجرام', `تمت تجربة إرسال إشعار إلى ${chatId}`, 'telegram');
-      }
+      setTelegramTestNotice(`❌ تنبيه تليجرام: ${res.error || 'فشل الإرسال'}`);
+      setTelegramErrorHint(res.hint || 'تأكد من إضافة البوت مشرفاً في القناة مع تفعيل صلاحية نشر الرسائل.');
     }
 
     setIsSendingTelegram(false);
-    setTimeout(() => setTelegramTestNotice(null), 4000);
   };
 
-  // Handle Manual Broadcast to Telegram Channel
-  const handleSendCustomBroadcast = () => {
+  // Handle Manual Broadcast to Telegram Channel (Calls server proxy)
+  const handleSendCustomBroadcast = async () => {
     const textToSend = broadcastCustomText.trim();
     if (!textToSend) return;
 
-    const logMsg = `[${new Date().toLocaleTimeString('ar-DZ')}] تم بث إعلان إلى ${settingsForm.telegramChatId}: "${textToSend.slice(0, 35)}..."`;
-    setTelegramLogs(prev => [logMsg, ...prev]);
-    setTelegramTestNotice('تم بث الإعلان إلى قناة ومجموعة التيليجرام بنجاح!');
-    if (onAddActivityLog) {
-      onAddActivityLog('بث إعلان في تلجرام', textToSend.slice(0, 60), 'telegram');
+    setIsSendingTelegram(true);
+    setTelegramTestNotice(null);
+    setTelegramErrorHint(null);
+
+    // Save settings first
+    onUpdateSiteSettings(settingsForm);
+    await api.saveSiteSettings(settingsForm);
+
+    const res = await api.broadcastTelegram(textToSend);
+    if (res.success) {
+      const logMsg = `[${new Date().toLocaleTimeString('ar-DZ')}] تم بث إعلان حقيقي إلى ${settingsForm.telegramChatId}: "${textToSend.slice(0, 35)}..."`;
+      setTelegramLogs(prev => [logMsg, ...prev]);
+      setTelegramTestNotice('🚀 تم بث الإعلان بنجاح إلى قناة ومجموعة التيليجرام!');
+      if (onAddActivityLog) {
+        onAddActivityLog('بث إعلان في تلجرام', textToSend.slice(0, 60), 'telegram');
+      }
+    } else {
+      setTelegramTestNotice(`❌ فشل البث: ${res.error || 'حدث خطأ'}`);
+      setTelegramErrorHint(res.hint || 'تأكد من إعداد التوكن ومعرف القناة وحفظهما في لوحة التحكم.');
     }
-    setTimeout(() => setTelegramTestNotice(null), 3000);
+
+    setIsSendingTelegram(false);
+    setTimeout(() => setTelegramTestNotice(null), 5000);
   };
 
   // Handle Preset Broadcast Template Change
@@ -1222,9 +1321,19 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">
-                  Telegram Bot Token (من @BotFather):
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-stone-700">
+                    Telegram Bot Token (من @BotFather):
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleVerifyBotToken}
+                    disabled={isVerifyingBot}
+                    className="text-[11px] font-bold text-sky-700 hover:text-sky-800 bg-sky-50 hover:bg-sky-100 border border-sky-200 px-2.5 py-0.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <span>{isVerifyingBot ? 'جارٍ الفحص...' : 'فحص التوكن'}</span>
+                  </button>
+                </div>
                 <input
                   type="text"
                   value={settingsForm.telegramBotToken}
@@ -1233,6 +1342,11 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
                   className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono text-stone-900 focus:bg-white focus:outline-hidden text-left"
                   dir="ltr"
                 />
+                {botVerificationData && (
+                  <span className="text-[11px] font-bold text-emerald-700 mt-1 block">
+                    🟢 متصل بالبوت: @{botVerificationData.username} ({botVerificationData.firstName})
+                  </span>
+                )}
               </div>
 
               <div>
@@ -1247,6 +1361,9 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
                   className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono text-stone-900 focus:bg-white focus:outline-hidden text-left"
                   dir="ltr"
                 />
+                <span className="text-[10px] text-stone-400 mt-1 block">
+                  اكتب معرف القناة العامة مسبوقاً بـ @ أو معرف القناة الخاصة الرقمي.
+                </span>
               </div>
             </div>
 
@@ -1317,6 +1434,29 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
                 <span>{isSendingTelegram ? 'جارٍ الإرسال...' : 'إرسال تجريبي'}</span>
               </button>
             </div>
+
+            {telegramErrorHint && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
+                <span className="font-bold block flex items-center gap-1">
+                  <span>💡 إرشادات حل مشكلة الاتصال:</span>
+                </span>
+                <p className="whitespace-pre-line text-[11px] text-amber-800 leading-relaxed">{telegramErrorHint}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Telegram Connection Guide */}
+          <div className="p-4 bg-sky-50/50 border border-sky-100 rounded-2xl space-y-2 text-xs text-stone-700">
+            <span className="font-bold text-sky-950 block">
+              📋 خطوات ربط بوت التيليجرام في دقيقة واحدة:
+            </span>
+            <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-stone-600 leading-relaxed">
+              <li>افتح تطبيق تلجرام وابحث عن الحساب الرسمي <strong className="text-sky-700 font-mono">@BotFather</strong>.</li>
+              <li>أرسل الأمر <code className="bg-sky-100/70 text-sky-900 px-1 py-0.5 rounded font-mono">/newbot</code> واختر اسماً للبوت، ثم انسخ كود الـ API Token والصقه هنا.</li>
+              <li>اضغط زر <strong>«فحص التوكن»</strong> للتأكد من اتصاله بالخادم بنجاح.</li>
+              <li>أضف البوت إلى قناتك أو مجموعتك وقم بترقيته إلى <strong>مشرف (Administrator)</strong> مع منح صلاحية <strong>نشر الرسائل (Post Messages)</strong>.</li>
+              <li>اكتب معرّف القناة (مثال: <code className="bg-sky-100/70 text-sky-900 px-1 py-0.5 rounded font-mono">@اسم_قناتك</code>) ثم اضغط <strong>«إرسال تجريبي»</strong> ثم <strong>«حفظ إعدادات البوت»</strong>.</li>
+            </ol>
           </div>
 
           {/* Quick Telegram Channel Broadcaster (بث مباشر للقناة) */}
@@ -2047,75 +2187,121 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
                   <th className="py-3 px-4">اسم المستخدم</th>
                   <th className="py-3 px-4">رقم الهاتف</th>
                   <th className="py-3 px-4">الشعبة</th>
+                  <th className="py-3 px-4 font-bold text-emerald-800 text-center">كلمة السر (خاص بالإدارة)</th>
                   <th className="py-3 px-4">الحضور</th>
                   <th className="py-3 px-4 font-mono font-bold text-stone-900">معدل الاختبارات</th>
                   <th className="py-3 px-4 text-center">إجراءات الإدارة والبطاقة</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {filteredStudents.map(student => (
-                  <tr key={student.id} className={`hover:bg-stone-50 ${student.isHidden ? 'bg-amber-50/40 opacity-80' : ''}`}>
-                    <td className="py-3 px-4 font-bold text-stone-900">
-                      <div className="flex items-center gap-1.5">
-                        <span>{student.fullName}</span>
-                        {student.isHidden && (
-                          <span className="text-[9px] bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-bold border border-amber-300">
-                            معطل/مخفي 🔒
-                          </span>
-                        )}
-                      </div>
-                      <span className="block text-[10px] text-stone-400 font-normal">{student.highSchool}</span>
-                    </td>
-                    <td className="py-3 px-4 font-mono text-stone-600">{student.username || '–'}</td>
-                    <td className="py-3 px-4 font-mono text-stone-600" dir="ltr">{student.phone}</td>
-                    <td className="py-3 px-4 text-stone-700">{student.stream}</td>
-                    <td className="py-3 px-4 font-mono font-bold text-emerald-700">{student.attendanceRate}%</td>
-                    <td className="py-3 px-4 font-mono font-bold text-stone-900">{student.averageScore} / 20</td>
-                    <td className="py-3 px-4 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => onSelectStudentForCard(student.id)}
-                          className="px-2 py-1 bg-stone-100 hover:bg-emerald-50 text-stone-800 hover:text-emerald-900 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1"
-                          title="عرض البطاقة الرقمية"
-                        >
-                          <Eye className="w-3 h-3 text-emerald-700" />
-                          <span className="hidden sm:inline">البطاقة</span>
-                        </button>
-
-                        {onToggleHideStudent && (
-                          <button
-                            type="button"
-                            onClick={() => onToggleHideStudent(student.id, !student.isHidden)}
-                            title={student.isHidden ? 'إلغاء التعطيل وإظهار التلميذ' : 'تعطيل وإخفاء التلميذ (خاص بالإدارة)'}
-                            className={`p-1 rounded-lg border text-xs transition-colors cursor-pointer ${
-                              student.isHidden
-                                ? 'bg-amber-100 border-amber-300 text-amber-800 hover:bg-amber-200'
-                                : 'bg-white border-stone-200 text-stone-500 hover:bg-stone-100'
-                            }`}
-                          >
-                            {student.isHidden ? <EyeOff className="w-3.5 h-3.5 text-amber-800" /> : <Eye className="w-3.5 h-3.5" />}
-                          </button>
-                        )}
-
-                        {onDeleteStudent && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (confirm(`هل أنت متأكد من حذف التلميذ «${student.fullName}» نهائياً من قاعدة البيانات؟ لا يمكن التراجع عن هذا الإجراء.`)) {
-                                onDeleteStudent(student.id);
-                              }
-                            }}
-                            title="حذف التلميذ نهائياً (خاص بالإدارة)"
-                            className="p-1 bg-white border border-stone-200 text-stone-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-300 rounded-lg transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
+                {filteredStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-stone-500 bg-stone-50/50">
+                      لا يوجد تلاميذ مسجلين حالياً في المنصة.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredStudents.map(student => (
+                    <tr key={student.id} className={`hover:bg-stone-50 ${student.isHidden ? 'bg-amber-50/40 opacity-80' : ''}`}>
+                      <td className="py-3 px-4 font-bold text-stone-900">
+                        <div className="flex items-center gap-1.5">
+                          <span>{student.fullName}</span>
+                          {student.isHidden && (
+                            <span className="text-[9px] bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-bold border border-amber-300">
+                              معطل/مخفي 🔒
+                            </span>
+                          )}
+                        </div>
+                        <span className="block text-[10px] text-stone-400 font-normal">{student.highSchool}</span>
+                      </td>
+                      <td className="py-3 px-4 font-mono text-stone-600">{student.username || '–'}</td>
+                      <td className="py-3 px-4 font-mono text-stone-600" dir="ltr">{student.phone}</td>
+                      <td className="py-3 px-4 text-stone-700">{student.stream}</td>
+                      <td className="py-3 px-4 text-center">
+                        <div className="inline-flex items-center gap-1.5 bg-stone-50 px-2 py-1 rounded-lg border border-stone-200">
+                          <span className="font-mono text-xs font-bold text-stone-800 min-w-16 text-center" dir="ltr">
+                            {revealedPasswords[student.id] ? (student.password || '123456') : '••••••••'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleRevealPassword(student.id)}
+                            className="p-1 text-stone-500 hover:text-stone-800 rounded hover:bg-stone-200/60 cursor-pointer"
+                            title={revealedPasswords[student.id] ? 'إخفاء كلمة السر' : 'إظهار كلمة السر'}
+                          >
+                            {revealedPasswords[student.id] ? <EyeOff className="w-3.5 h-3.5 text-emerald-800" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPassword(student.id, student.password || '123456')}
+                            className="p-1 text-stone-500 hover:text-stone-800 rounded hover:bg-stone-200/60 cursor-pointer"
+                            title="نسخ كلمة السر"
+                          >
+                            {copiedPasswordId === student.id ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditPasswordModal({
+                              id: student.id,
+                              name: student.fullName,
+                              username: student.username,
+                              role: 'student',
+                              currentPassword: student.password || '123456'
+                            })}
+                            className="p-1 text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 rounded cursor-pointer transition-colors"
+                            title="تغيير كلمة السر للتلميذ"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 font-mono font-bold text-emerald-700">{student.attendanceRate}%</td>
+                      <td className="py-3 px-4 font-mono font-bold text-stone-900">{student.averageScore} / 20</td>
+                      <td className="py-3 px-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => onSelectStudentForCard(student.id)}
+                            className="px-2 py-1 bg-stone-100 hover:bg-emerald-50 text-stone-800 hover:text-emerald-900 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                            title="عرض البطاقة الرقمية"
+                          >
+                            <Eye className="w-3 h-3 text-emerald-700" />
+                            <span className="hidden sm:inline">البطاقة</span>
+                          </button>
+
+                          {onToggleHideStudent && (
+                            <button
+                              type="button"
+                              onClick={() => onToggleHideStudent(student.id, !student.isHidden)}
+                              title={student.isHidden ? 'إلغاء التعطيل وإظهار التلميذ' : 'تعطيل وإخفاء التلميذ (خاص بالإدارة)'}
+                              className={`p-1 rounded-lg border text-xs transition-colors cursor-pointer ${
+                                student.isHidden
+                                  ? 'bg-amber-100 border-amber-300 text-amber-800 hover:bg-amber-200'
+                                  : 'bg-white border-stone-200 text-stone-500 hover:bg-stone-100'
+                              }`}
+                            >
+                              {student.isHidden ? <EyeOff className="w-3.5 h-3.5 text-amber-800" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+
+                          {onDeleteStudent && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirm(`هل أنت متأكد من حذف التلميذ «${student.fullName}» نهائياً من قاعدة البيانات؟ لا يمكن التراجع عن هذا الإجراء.`)) {
+                                  onDeleteStudent(student.id);
+                                }
+                              }}
+                              title="حذف التلميذ نهائياً (خاص بالإدارة)"
+                              className="p-1 bg-white border border-stone-200 text-stone-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-300 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -2508,6 +2694,145 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
             >
               إعادة ضبط البيانات الافتراضية
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Password Edit Modal for Students & Teachers (ADMIN EXCLUSIVE) */}
+      {editingPasswordUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-stone-200 relative text-right animate-in fade-in zoom-in-95 duration-150">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-stone-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                  <KeyRound className="w-5 h-5 text-emerald-700" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900">
+                    تغيير كلمة السر (إدارة الجمعية)
+                  </h3>
+                  <span className="text-[11px] text-stone-500">
+                    {editingPasswordUser.role === 'teacher' ? 'حساب أستاذ مؤطر' : 'حساب تلميذ مسجل'}
+                  </span>
+                </div>
+              </div>
+
+              <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                editingPasswordUser.role === 'teacher' 
+                  ? 'bg-blue-100 text-blue-800 border border-blue-200' 
+                  : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+              }`}>
+                {editingPasswordUser.role === 'teacher' ? 'أستاذ' : 'تلميذ'}
+              </span>
+            </div>
+
+            {/* Target User Summary Card */}
+            <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200 mb-4 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-stone-500">الاسم الكامل:</span>
+                <span className="font-bold text-stone-900">{editingPasswordUser.name}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-stone-500">اسم المستخدم (للدخول):</span>
+                <span className="font-mono font-bold text-stone-800">{editingPasswordUser.username || '–'}</span>
+              </div>
+              {editingPasswordUser.currentPassword && (
+                <div className="flex justify-between items-center pt-1 border-t border-stone-200/60">
+                  <span className="text-stone-500">كلمة السر المسجلة حالياً:</span>
+                  <span className="font-mono font-bold text-emerald-800 bg-white px-2 py-0.5 rounded border border-emerald-200 text-xs" dir="ltr">
+                    {editingPasswordUser.currentPassword}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {passwordModalNotice && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-950 font-bold flex items-center gap-2 mb-4 animate-bounce">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{passwordModalNotice}</span>
+              </div>
+            )}
+
+            {/* Edit Form */}
+            <form onSubmit={handleSaveUserPasswordSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-stone-800 mb-1">
+                  كلمة السر الجديدة:
+                </label>
+                <div className="relative">
+                  <input
+                    type={showModalPassword ? 'text' : 'password'}
+                    value={newPasswordForUser}
+                    onChange={(e) => setNewPasswordForUser(e.target.value)}
+                    required
+                    placeholder="أدخل كلمة سر جديدة لا تقل عن 3 خانات..."
+                    className="w-full pr-3.5 pl-10 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-mono font-bold text-stone-900 focus:bg-white focus:outline-hidden"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowModalPassword(!showModalPassword)}
+                    className="absolute left-3 top-2.5 text-stone-400 hover:text-stone-700 cursor-pointer"
+                  >
+                    {showModalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Password Generators */}
+              <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                <span className="text-stone-500">اقتراحات سريعة:</span>
+                <button
+                  type="button"
+                  onClick={() => setNewPasswordForUser(Math.floor(100000 + Math.random() * 900000).toString())}
+                  className="px-2 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg font-mono cursor-pointer transition-colors"
+                >
+                  ⚡ رمز 6 أرقام
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewPasswordForUser('bac2027dz')}
+                  className="px-2 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg font-mono cursor-pointer transition-colors"
+                >
+                  bac2027dz
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewPasswordForUser('123456')}
+                  className="px-2 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg font-mono cursor-pointer transition-colors"
+                >
+                  123456
+                </button>
+              </div>
+
+              <p className="text-[10px] text-stone-500 leading-relaxed">
+                🔒 يمكن للإدارة تعديل كلمة السر في أي وقت وتزويد الأستاذ أو التلميذ بها للدخول إلى فضاء المنصة والبطاقة الرقمية.
+              </p>
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-stone-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingPasswordUser(null);
+                    setNewPasswordForUser('');
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-stone-600 hover:text-stone-900 cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>حفظ كلمة السر الآن</span>
+                </button>
+              </div>
+            </form>
+
           </div>
         </div>
       )}

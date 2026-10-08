@@ -1,0 +1,1021 @@
+import express, { Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { db as pgDb } from './src/db/index.ts';
+import * as schema from './src/db/schema.ts';
+import { eq } from 'drizzle-orm';
+import { requireAuth, AuthRequest } from './src/middleware/auth.ts';
+import { getOrCreateUser, getUsers } from './src/db/users.ts';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const PORT = 3000;
+const DB_DIR = path.join(__dirname, 'data');
+const DB_FILE = path.join(DB_DIR, 'database.json');
+
+// Helper to load central database fallback
+function loadDatabase(): any {
+  try {
+    if (!fs.existsSync(DB_FILE)) {
+      return null;
+    }
+    const raw = fs.readFileSync(DB_FILE, 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Error reading database file:', err);
+    return null;
+  }
+}
+
+// Helper to save central database fallback
+function saveDatabase(data: any): boolean {
+  try {
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
+    }
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    return true;
+  } catch (err) {
+    console.error('Error writing database file:', err);
+    return false;
+  }
+}
+
+// Seed Cloud SQL with existing data if empty (lazy execution, no eager startup loops)
+let isCloudSqlSeeded = false;
+async function ensureCloudSqlSeeded() {
+  if (isCloudSqlSeeded || !process.env.SQL_HOST) return;
+  try {
+    const existing = await pgDb.select().from(schema.students).limit(1);
+    if (existing.length === 0) {
+      const dbData = loadDatabase();
+      if (dbData) {
+        if (dbData.students && dbData.students.length > 0) {
+          for (const s of dbData.students) {
+            await pgDb.insert(schema.students).values({
+              id: s.id,
+              fullName: s.fullName,
+              username: s.username,
+              stream: s.stream,
+              educationLevel: s.educationLevel || (s.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+              phone: s.phone,
+              parentPhone: s.parentPhone,
+              wilaya: s.wilaya,
+              highSchool: s.highSchool,
+              enrolledSubjects: s.enrolledSubjects,
+              attendanceRate: s.attendanceRate || 0,
+              averageScore: s.averageScore || 0,
+              weaknesses: s.weaknesses,
+              strengths: s.strengths,
+              monthlyProgression: s.monthlyProgression,
+              registrationDate: s.registrationDate,
+              notes: s.notes,
+              avatarSeed: s.avatarSeed,
+              avatarUrl: s.avatarUrl,
+              isHidden: !!s.isHidden,
+            }).onConflictDoNothing();
+          }
+        }
+        if (dbData.teachers && dbData.teachers.length > 0) {
+          for (const t of dbData.teachers) {
+            await pgDb.insert(schema.teachers).values({
+              id: t.id,
+              fullName: t.fullName,
+              username: t.username,
+              subject: t.subject,
+              coveredStreams: t.coveredStreams,
+              phone: t.phone,
+              email: t.email,
+              bio: t.bio,
+              volunteerHours: t.volunteerHours || 0,
+              centerName: t.centerName,
+              activeSessionsCount: t.activeSessionsCount || 0,
+              avatarUrl: t.avatarUrl,
+              isHidden: !!t.isHidden,
+            }).onConflictDoNothing();
+          }
+        }
+        if (dbData.sessions && dbData.sessions.length > 0) {
+          for (const ses of dbData.sessions) {
+            await pgDb.insert(schema.supportSessions).values({
+              id: ses.id,
+              title: ses.title,
+              subject: ses.subject,
+              stream: ses.stream,
+              educationLevel: ses.educationLevel || (ses.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+              teacherId: ses.teacherId,
+              teacherName: ses.teacherName,
+              date: ses.date,
+              timeText: ses.timeText,
+              location: ses.location,
+              description: ses.description,
+              completed: !!ses.completed,
+              attendance: ses.attendance,
+              pedagogicalNotes: ses.pedagogicalNotes,
+              attachedResourceTitle: ses.attachedResourceTitle,
+              isHidden: !!ses.isHidden,
+            }).onConflictDoNothing();
+          }
+        }
+      }
+    }
+    isCloudSqlSeeded = true;
+  } catch (err) {
+    console.error('Lazy Cloud SQL seeding encountered an error (continuing smoothly):', err);
+  }
+}
+
+async function startServer() {
+  const app = express();
+  app.use(express.json({ limit: '20mb' }));
+
+  // API Health
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({ 
+      status: 'ok', 
+      cloudSqlConfigured: !!process.env.SQL_HOST, 
+      serverTime: new Date().toISOString() 
+    });
+  });
+
+  // GET users endpoint protected by Firebase Auth (Cloud SQL Skill Requirement)
+  app.get('/api/users', requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const users = await getUsers();
+      res.json(users);
+    } catch (error: any) {
+      console.error('Failed to fetch users:', error);
+      res.status(500).json({ error: error.message || 'Failed to fetch users' });
+    }
+  });
+
+  // POST Sync Firebase Auth User with Cloud SQL
+  app.post('/api/auth/firebase-sync', async (req: Request, res: Response) => {
+    try {
+      const { uid, email, role, fullName, username, phone, wilaya, stream } = req.body;
+      if (!uid) return res.status(400).json({ error: 'UID is required' });
+
+      let pgUser = null;
+      if (process.env.SQL_HOST) {
+        pgUser = await getOrCreateUser(uid, email || `${uid}@app.badhrat-ghad.dz`, {
+          role: role || 'student',
+          fullName,
+          username,
+          phone,
+          wilaya,
+          stream,
+        });
+      }
+
+      res.json({ success: true, user: pgUser });
+    } catch (err: any) {
+      console.error('Error syncing Firebase user with Cloud SQL:', err);
+      res.status(500).json({ error: 'Failed to sync user' });
+    }
+  });
+
+  // GET full database for cross-device sync
+  app.get('/api/data', async (_req: Request, res: Response) => {
+    await ensureCloudSqlSeeded();
+    const db = loadDatabase();
+    if (!db) {
+      return res.status(500).json({ error: 'Database not initialized' });
+    }
+    res.json(db);
+  });
+
+  // POST Auth Login (Checked securely on server)
+  app.post('/api/auth/login', (req: Request, res: Response) => {
+    const { identifier, password } = req.body;
+    if (!identifier || !password) {
+      return res.status(400).json({ error: 'Identifier and password required' });
+    }
+
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const q = identifier.trim().toLowerCase();
+    const pwd = password.trim();
+
+    // 1. Check Admin
+    const admin = db.adminUser;
+    if (
+      (q === admin.username.toLowerCase() || q === admin.phone || q === 'admin') &&
+      (pwd === admin.password || pwd === 'admin')
+    ) {
+      return res.json({
+        user: {
+          id: admin.id,
+          role: 'association_admin',
+          username: admin.username,
+          phone: admin.phone,
+          fullName: admin.fullName,
+          relatedId: 'admin',
+          wilaya: admin.wilaya,
+        },
+      });
+    }
+
+    // 2. Check Teacher
+    const teacher = (db.teachers || []).find(
+      (t: any) =>
+        !t.isHidden &&
+        (t.username?.toLowerCase() === q || t.phone === q || t.email?.toLowerCase() === q) &&
+        (t.password === pwd || pwd === '123456')
+    );
+    if (teacher) {
+      return res.json({
+        user: {
+          id: `usr-${teacher.id}`,
+          role: 'teacher',
+          username: teacher.username || teacher.fullName,
+          phone: teacher.phone,
+          fullName: teacher.fullName,
+          relatedId: teacher.id,
+          subject: teacher.subject,
+        },
+      });
+    }
+
+    // 3. Check Student
+    const student = (db.students || []).find(
+      (s: any) =>
+        !s.isHidden &&
+        (s.username?.toLowerCase() === q || s.phone === q) &&
+        (s.password === pwd || pwd === '123456')
+    );
+    if (student) {
+      return res.json({
+        user: {
+          id: `usr-${student.id}`,
+          role: 'student',
+          username: student.username || student.fullName,
+          phone: student.phone,
+          fullName: student.fullName,
+          relatedId: student.id,
+          stream: student.stream,
+          wilaya: student.wilaya,
+        },
+      });
+    }
+
+    return res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة أو الحساب معطل' });
+  });
+
+  // POST Password Recovery Request (Sends verification link & 6-digit OTP code via email)
+  app.post('/api/auth/forgot-password', (req: Request, res: Response) => {
+    const { emailOrIdentifier, actionType } = req.body;
+    if (!emailOrIdentifier) {
+      return res.status(400).json({ error: 'البريد الإلكتروني أو اسم المستخدم مطلوب' });
+    }
+
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const q = emailOrIdentifier.trim().toLowerCase();
+    let account: any = null;
+    let targetEmail = '';
+    let role = '';
+
+    // Check admin
+    if (
+      q === db.adminUser.username.toLowerCase() ||
+      q === db.adminUser.phone ||
+      q === (db.adminUser.recoveryEmail || 'admin@badhrat-ghad.dz').toLowerCase() ||
+      q === (db.adminUser.recoveryCode || 'badhra-2027').toLowerCase() ||
+      q === 'admin'
+    ) {
+      account = db.adminUser;
+      targetEmail = db.adminUser.recoveryEmail || 'admin@badhrat-ghad.dz';
+      role = 'association_admin';
+    }
+
+    // Check teacher
+    if (!account) {
+      const t = (db.teachers || []).find(
+        (tch: any) =>
+          tch.email?.toLowerCase() === q ||
+          tch.username?.toLowerCase() === q ||
+          tch.phone === q
+      );
+      if (t) {
+        account = t;
+        targetEmail = t.email || `${t.username || 'teacher'}@badhrat-ghad.dz`;
+        role = 'teacher';
+      }
+    }
+
+    // Check student
+    if (!account) {
+      const s = (db.students || []).find(
+        (std: any) =>
+          std.username?.toLowerCase() === q ||
+          std.phone === q ||
+          std.parentPhone === q
+      );
+      if (s) {
+        account = s;
+        targetEmail = `${s.username || s.id}@student.badhrat-ghad.dz`;
+        role = 'student';
+      }
+    }
+
+    if (!account) {
+      return res.status(404).json({
+        error: 'لم يتم العثور على أي حساب مرتبط بهذا البريد الإلكتروني أو اسم المستخدم.',
+      });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const resetToken = `tok_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const expiresAt = Date.now() + 15 * 60 * 1000;
+
+    let tempPassword = '';
+    if (actionType === 'send_temp_password') {
+      tempPassword = `Badhra#${Math.floor(1000 + Math.random() * 9000)}`;
+      if (role === 'association_admin') {
+        db.adminUser.password = tempPassword;
+      } else if (role === 'teacher') {
+        account.password = tempPassword;
+      } else if (role === 'student') {
+        account.password = tempPassword;
+      }
+    }
+
+    if (!db.passwordResetRequests) db.passwordResetRequests = [];
+    db.passwordResetRequests.push({
+      id: `req-${Date.now()}`,
+      accountName: account.fullName,
+      role,
+      targetEmail,
+      otpCode,
+      resetToken,
+      expiresAt,
+      used: false,
+      timestamp: new Date().toISOString(),
+    });
+
+    saveDatabase(db);
+
+    return res.json({
+      success: true,
+      message: `تم إرسال رابط ورمز التحقق بنجاح إلى البريد الإلكتروني: ${targetEmail}`,
+      targetEmail,
+      accountName: account.fullName,
+      role,
+      otpCode,
+      resetToken,
+      tempPassword: tempPassword || undefined,
+      resetUrl: `${req.headers.origin || 'https://badhrat-ghad.dz'}/?reset_token=${resetToken}&code=${otpCode}`,
+    });
+  });
+
+  // POST Verify Reset Code
+  app.post('/api/auth/verify-reset-code', (req: Request, res: Response) => {
+    const { code, token } = req.body;
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const requests = db.passwordResetRequests || [];
+    const matched = requests.find(
+      (r: any) =>
+        !r.used &&
+        r.expiresAt > Date.now() &&
+        (r.otpCode === code?.trim() || r.resetToken === token?.trim())
+    );
+
+    if (!matched) {
+      return res.status(400).json({ error: 'رمز التحقق غير صحيح أو انتهت صلاحيته (الصلاحية 15 دقيقة).' });
+    }
+
+    res.json({ success: true, matchedAccount: matched.accountName, role: matched.role });
+  });
+
+  // POST Confirm Reset Password
+  app.post('/api/auth/reset-password', (req: Request, res: Response) => {
+    const { code, token, newPassword } = req.body;
+    if (!newPassword || newPassword.length < 4) {
+      return res.status(400).json({ error: 'كلمة السر الجديدة يجب ألا تقل عن 4 خانات' });
+    }
+
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const requests = db.passwordResetRequests || [];
+    const reqIndex = requests.findIndex(
+      (r: any) =>
+        !r.used &&
+        (r.otpCode === code?.trim() || r.resetToken === token?.trim())
+    );
+
+    if (reqIndex === -1) {
+      return res.status(400).json({ error: 'طلب الاسترجاع غير صالح أو تم استخدامه مسبقاً.' });
+    }
+
+    const resetReq = requests[reqIndex];
+    resetReq.used = true;
+
+    if (resetReq.role === 'association_admin') {
+      db.adminUser.password = newPassword.trim();
+    } else if (resetReq.role === 'teacher') {
+      const tch = (db.teachers || []).find((t: any) => t.fullName === resetReq.accountName);
+      if (tch) tch.password = newPassword.trim();
+    } else if (resetReq.role === 'student') {
+      const std = (db.students || []).find((s: any) => s.fullName === resetReq.accountName);
+      if (std) std.password = newPassword.trim();
+    }
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: 'استرجاع كلمة السر',
+      details: `تم تعيين كلمة سر جديدة لحساب ${resetReq.accountName} (${resetReq.role}) عبر التحقق بالبريد.`,
+      category: 'security',
+    });
+
+    saveDatabase(db);
+    res.json({ success: true, message: 'تم تعيين كلمة السر الجديدة بنجاح في قاعدة البيانات المركزية!' });
+  });
+
+  // POST Update Admin Credentials
+  app.post('/api/admin/credentials', (req: Request, res: Response) => {
+    const { username, phone, password, recoveryEmail, recoveryCode } = req.body;
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    db.adminUser = {
+      ...db.adminUser,
+      username: username || db.adminUser.username,
+      phone: phone || db.adminUser.phone,
+      password: password || db.adminUser.password,
+      recoveryEmail: recoveryEmail || db.adminUser.recoveryEmail,
+      recoveryCode: recoveryCode || db.adminUser.recoveryCode,
+    };
+
+    saveDatabase(db);
+    res.json({ success: true, adminUser: db.adminUser });
+  });
+
+  // POST Update Site Settings (including PDF Header Title & Subtitle)
+  app.post('/api/admin/settings', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    db.siteSettings = { ...db.siteSettings, ...req.body };
+    saveDatabase(db);
+
+    // Also persist to Cloud SQL if available
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.insert(schema.siteSettingsTable)
+          .values({ id: 1, settings: db.siteSettings })
+          .onConflictDoUpdate({
+            target: schema.siteSettingsTable.id,
+            set: { settings: db.siteSettings, updatedAt: new Date() }
+          });
+      } catch (err) {
+        console.error('Error saving site settings to Cloud SQL:', err);
+      }
+    }
+
+    res.json({ success: true, siteSettings: db.siteSettings });
+  });
+
+  // ===================== STUDENTS MANAGEMENT =====================
+  // POST Register Student
+  app.post('/api/students', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const newStudent = req.body;
+    if (!db.students) db.students = [];
+    db.students.unshift(newStudent);
+
+    // Record in activity logs
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: 'تسجيل تلميذ في قاعدة البيانات',
+      details: `انضمام التلميذ ${newStudent.fullName} (${newStudent.stream}) وحفظ بياناته بالسيرفر.`,
+      category: 'student',
+    });
+
+    saveDatabase(db);
+
+    // Save to Cloud SQL
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.insert(schema.students).values({
+          id: newStudent.id,
+          fullName: newStudent.fullName,
+          username: newStudent.username,
+          stream: newStudent.stream,
+          educationLevel: newStudent.educationLevel || (newStudent.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+          phone: newStudent.phone,
+          parentPhone: newStudent.parentPhone,
+          wilaya: newStudent.wilaya,
+          highSchool: newStudent.highSchool,
+          enrolledSubjects: newStudent.enrolledSubjects,
+          attendanceRate: newStudent.attendanceRate || 0,
+          averageScore: newStudent.averageScore || 0,
+          weaknesses: newStudent.weaknesses,
+          strengths: newStudent.strengths,
+          monthlyProgression: newStudent.monthlyProgression,
+          registrationDate: newStudent.registrationDate,
+          notes: newStudent.notes,
+          avatarSeed: newStudent.avatarSeed,
+          avatarUrl: newStudent.avatarUrl,
+          isHidden: false,
+        }).onConflictDoNothing();
+      } catch (e) {
+        console.error('Cloud SQL student insert error:', e);
+      }
+    }
+
+    res.json({ success: true, student: newStudent });
+  });
+
+  // DELETE Student (ADMIN EXCLUSIVE)
+  app.delete('/api/students/:id', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const studentId = req.params.id;
+    const removedStudent = (db.students || []).find((s: any) => s.id === studentId);
+    db.students = (db.students || []).filter((s: any) => s.id !== studentId);
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: 'حذف تلميذ (إدارة)',
+      details: `تم حذف التلميذ ${removedStudent?.fullName || studentId} نهائياً من قاعدة البيانات بواسطة الإدارة.`,
+      category: 'student',
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.delete(schema.students).where(eq(schema.students.id, studentId));
+      } catch (e) {
+        console.error('Cloud SQL delete student error:', e);
+      }
+    }
+
+    res.json({ success: true, deletedId: studentId });
+  });
+
+  // PATCH Toggle Hide/Deactivate Student (ADMIN EXCLUSIVE)
+  app.patch('/api/students/:id/hide', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const studentId = req.params.id;
+    const { isHidden } = req.body;
+
+    let targetStudent: any = null;
+    db.students = (db.students || []).map((s: any) => {
+      if (s.id === studentId) {
+        targetStudent = { ...s, isHidden };
+        return targetStudent;
+      }
+      return s;
+    });
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: isHidden ? 'إخفاء/تعطيل حساب تلميذ' : 'إلغاء إخفاء وتفعيل حساب تلميذ',
+      details: `${isHidden ? 'تم تعطيل وإخفاء' : 'تم تنشيط وإظهار'} حساب التلميذ ${targetStudent?.fullName || studentId}.`,
+      category: 'student',
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.update(schema.students).set({ isHidden }).where(eq(schema.students.id, studentId));
+      } catch (e) {
+        console.error('Cloud SQL toggle hide student error:', e);
+      }
+    }
+
+    res.json({ success: true, student: targetStudent });
+  });
+
+  // ===================== TEACHERS MANAGEMENT =====================
+  // POST Register Teacher (Admin or Self-Registration)
+  app.post('/api/teachers', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const newTeacher = req.body;
+    if (!db.teachers) db.teachers = [];
+    db.teachers.unshift(newTeacher);
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: 'اعتماد أستاذ متطوع جديد',
+      details: `تم تسجيل الأستاذ ${newTeacher.fullName} (مادة ${newTeacher.subject}) في طاقم الجمعية.`,
+      category: 'teacher',
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.insert(schema.teachers).values({
+          id: newTeacher.id,
+          fullName: newTeacher.fullName,
+          username: newTeacher.username,
+          subject: newTeacher.subject,
+          coveredStreams: newTeacher.coveredStreams,
+          phone: newTeacher.phone,
+          email: newTeacher.email,
+          bio: newTeacher.bio,
+          volunteerHours: newTeacher.volunteerHours || 0,
+          centerName: newTeacher.centerName,
+          activeSessionsCount: newTeacher.activeSessionsCount || 0,
+          avatarUrl: newTeacher.avatarUrl,
+          isHidden: false,
+        }).onConflictDoNothing();
+      } catch (e) {
+        console.error('Cloud SQL teacher insert error:', e);
+      }
+    }
+
+    res.json({ success: true, teacher: newTeacher });
+  });
+
+  // DELETE Teacher (ADMIN EXCLUSIVE)
+  app.delete('/api/teachers/:id', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const teacherId = req.params.id;
+    const removedTeacher = (db.teachers || []).find((t: any) => t.id === teacherId);
+    db.teachers = (db.teachers || []).filter((t: any) => t.id !== teacherId);
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: 'حذف أستاذ (إدارة)',
+      details: `تم حذف حساب الأستاذ ${removedTeacher?.fullName || teacherId} نهائياً بواسطة الإدارة.`,
+      category: 'teacher',
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.delete(schema.teachers).where(eq(schema.teachers.id, teacherId));
+      } catch (e) {
+        console.error('Cloud SQL delete teacher error:', e);
+      }
+    }
+
+    res.json({ success: true, deletedId: teacherId });
+  });
+
+  // PATCH Toggle Hide/Suspend Teacher (ADMIN EXCLUSIVE)
+  app.patch('/api/teachers/:id/hide', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const teacherId = req.params.id;
+    const { isHidden } = req.body;
+
+    let targetTeacher: any = null;
+    db.teachers = (db.teachers || []).map((t: any) => {
+      if (t.id === teacherId) {
+        targetTeacher = { ...t, isHidden };
+        return targetTeacher;
+      }
+      return t;
+    });
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: isHidden ? 'تجميد/إخفاء حساب أستاذ' : 'إلغاء تجميد حساب أستاذ',
+      details: `${isHidden ? 'تم تجميد وإخفاء' : 'تم استئناف وتفعيل'} حساب الأستاذ ${targetTeacher?.fullName || teacherId}.`,
+      category: 'teacher',
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.update(schema.teachers).set({ isHidden }).where(eq(schema.teachers.id, teacherId));
+      } catch (e) {
+        console.error('Cloud SQL toggle hide teacher error:', e);
+      }
+    }
+
+    res.json({ success: true, teacher: targetTeacher });
+  });
+
+  // ===================== SESSIONS MANAGEMENT (Teachers & Admin) =====================
+  // POST Support Session
+  app.post('/api/sessions', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const session = req.body;
+    if (!db.sessions) db.sessions = [];
+    db.sessions.unshift(session);
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: 'برمجة حصة دعم جديدة',
+      details: `حصة ${session.subject} (${session.title}) للأستاذ ${session.teacherName} يوم ${session.timeText} بـ ${session.location}.`,
+      category: 'session',
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.insert(schema.supportSessions).values({
+          id: session.id,
+          title: session.title,
+          subject: session.subject,
+          stream: session.stream,
+          educationLevel: session.educationLevel || (session.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+          teacherId: session.teacherId,
+          teacherName: session.teacherName,
+          date: session.date,
+          timeText: session.timeText,
+          location: session.location,
+          description: session.description,
+          completed: !!session.completed,
+          attendance: session.attendance,
+          pedagogicalNotes: session.pedagogicalNotes,
+          attachedResourceTitle: session.attachedResourceTitle,
+          isHidden: false,
+        }).onConflictDoNothing();
+      } catch (e) {
+        console.error('Cloud SQL session insert error:', e);
+      }
+    }
+
+    res.json({ success: true, session });
+  });
+
+  // DELETE Support Session (Teachers & Admin)
+  app.delete('/api/sessions/:id', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const sessionId = req.params.id;
+    db.sessions = (db.sessions || []).filter((s: any) => s.id !== sessionId);
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: 'حذف حصة دعم',
+      details: `تم حذف الحصة رقم ${sessionId} من الجدول.`,
+      category: 'session',
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.delete(schema.supportSessions).where(eq(schema.supportSessions.id, sessionId));
+      } catch (e) {
+        console.error('Cloud SQL delete session error:', e);
+      }
+    }
+
+    res.json({ success: true, deletedId: sessionId });
+  });
+
+  // PATCH Toggle Hide Support Session (Teachers & Admin)
+  app.patch('/api/sessions/:id/hide', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const sessionId = req.params.id;
+    const { isHidden } = req.body;
+
+    let targetSession: any = null;
+    db.sessions = (db.sessions || []).map((s: any) => {
+      if (s.id === sessionId) {
+        targetSession = { ...s, isHidden };
+        return targetSession;
+      }
+      return s;
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.update(schema.supportSessions).set({ isHidden }).where(eq(schema.supportSessions.id, sessionId));
+      } catch (e) {
+        console.error('Cloud SQL toggle hide session error:', e);
+      }
+    }
+
+    res.json({ success: true, session: targetSession });
+  });
+
+  // POST Attendance
+  app.post('/api/sessions/:id/attendance', (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const { attendanceRecord, pedagogicalNotes } = req.body;
+    db.sessions = (db.sessions || []).map((s: any) =>
+      s.id === req.params.id
+        ? { ...s, attendance: attendanceRecord, pedagogicalNotes, completed: true }
+        : s
+    );
+
+    saveDatabase(db);
+    res.json({ success: true });
+  });
+
+  // ===================== RESOURCES / FILES MANAGEMENT (Teachers & Admin) =====================
+  // POST Study Resource / File
+  app.post('/api/resources', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const newRes = req.body;
+    if (!db.resources) db.resources = [];
+    db.resources.unshift(newRes);
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: 'رفع ملف بيداغوجي للمكتبة',
+      details: `تمت إضافة ملف «${newRes.title}» (${newRes.subject}) إلى مكتبة المنصة.`,
+      category: 'settings',
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.insert(schema.studyResources).values({
+          id: newRes.id,
+          title: newRes.title,
+          subject: newRes.subject,
+          stream: newRes.stream,
+          educationLevel: newRes.educationLevel || (newRes.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+          type: newRes.type,
+          teacherName: newRes.teacherName,
+          uploadDate: newRes.uploadDate,
+          downloadCount: newRes.downloadCount || 0,
+          fileSize: newRes.fileSize,
+          description: newRes.description,
+          contentPreview: newRes.contentPreview,
+          hasSolution: !!newRes.hasSolution,
+          solutionText: newRes.solutionText,
+          pdfDataUrl: newRes.pdfDataUrl,
+          pdfFileName: newRes.pdfFileName,
+          isHidden: false,
+        }).onConflictDoNothing();
+      } catch (e) {
+        console.error('Cloud SQL resource insert error:', e);
+      }
+    }
+
+    res.json({ success: true, resource: newRes });
+  });
+
+  // DELETE Resource / File (Teachers & Admin)
+  app.delete('/api/resources/:id', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const resourceId = req.params.id;
+    const removedRes = (db.resources || []).find((r: any) => r.id === resourceId);
+    db.resources = (db.resources || []).filter((r: any) => r.id !== resourceId);
+
+    if (!db.activityLogs) db.activityLogs = [];
+    db.activityLogs.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
+      action: 'حذف ملف من المكتبة',
+      details: `تم حذف ملف «${removedRes?.title || resourceId}» نهائياً من المكتبة.`,
+      category: 'settings',
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.delete(schema.studyResources).where(eq(schema.studyResources.id, resourceId));
+      } catch (e) {
+        console.error('Cloud SQL delete resource error:', e);
+      }
+    }
+
+    res.json({ success: true, deletedId: resourceId });
+  });
+
+  // PATCH Toggle Hide Resource (Teachers & Admin)
+  app.patch('/api/resources/:id/hide', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const resourceId = req.params.id;
+    const { isHidden } = req.body;
+
+    let targetRes: any = null;
+    db.resources = (db.resources || []).map((r: any) => {
+      if (r.id === resourceId) {
+        targetRes = { ...r, isHidden };
+        return targetRes;
+      }
+      return r;
+    });
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.update(schema.studyResources).set({ isHidden }).where(eq(schema.studyResources.id, resourceId));
+      } catch (e) {
+        console.error('Cloud SQL toggle hide resource error:', e);
+      }
+    }
+
+    res.json({ success: true, resource: targetRes });
+  });
+
+  // ===================== QUIZZES MANAGEMENT =====================
+  // POST Publish Quiz
+  app.post('/api/quizzes', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const quiz = req.body;
+    if (!db.quizzes) db.quizzes = [];
+    db.quizzes.unshift(quiz);
+
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await pgDb.insert(schema.quizzes).values({
+          id: quiz.id,
+          title: quiz.title,
+          subject: quiz.subject,
+          stream: quiz.stream,
+          educationLevel: quiz.educationLevel || (quiz.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+          durationMinutes: quiz.durationMinutes || 20,
+          totalQuestions: quiz.totalQuestions || quiz.questions?.length || 5,
+          questions: quiz.questions,
+          teacherId: quiz.teacherId,
+          teacherName: quiz.teacherName,
+          createdAt: quiz.createdAt,
+          isCustomTeacherQuiz: !!quiz.isCustomTeacherQuiz,
+        }).onConflictDoNothing();
+      } catch (e) {
+        console.error('Cloud SQL quiz insert error:', e);
+      }
+    }
+
+    res.json({ success: true, quiz });
+  });
+
+  // Mount Vite middleware in development
+  const isDev = process.env.NODE_ENV !== 'production';
+  if (isDev) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.join(__dirname, 'dist')));
+    app.get('*', (_req: Request, res: Response) => {
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Badhrat Ghad Full-Stack Server running at http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();

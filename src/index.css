@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@media print {
+  .no-print,
+  nav,
+  header,
+  footer,
+  aside,
+  button:not(.allow-print) {
+    display: none !important;
+  }
+
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+}

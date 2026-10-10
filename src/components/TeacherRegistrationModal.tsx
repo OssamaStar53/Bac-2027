@@ -9,18 +9,18 @@ import {
   Eye, 
   EyeOff,
   Sparkles,
-  GraduationCap
+  School
 } from 'lucide-react';
-import { Student, AppUser } from '../types';
+import { Teacher, AppUser } from '../types';
 import { BadhraLogo } from './BadhraLogo';
 
-interface StudentRegistrationModalProps {
+interface TeacherRegistrationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onRegister: (newStudent: Student, newUser?: AppUser) => void;
+  onRegister: (newTeacher: Teacher, newUser: AppUser) => void;
 }
 
-export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> = ({
+export const TeacherRegistrationModal: React.FC<TeacherRegistrationModalProps> = ({
   isOpen,
   onClose,
   onRegister,
@@ -40,7 +40,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
     e.preventDefault();
     const errs: Record<string, string> = {};
 
-    if (!firstName.trim() || !lastName.trim()) errs.name = 'يرجى إدخال الاسم واللقب معاً';
+    if (!firstName.trim() || !lastName.trim()) errs.name = 'يرجى إدخال اسم ولقب الأستاذ معاً';
     if (!email.trim() || !email.includes('@')) errs.email = 'يرجى إدخال بريد إلكتروني صحيح';
     if (!phone.trim() || phone.trim().length < 8) errs.phone = 'يرجى إدخال رقم هاتف صحيح';
     if (!password.trim() || password.length < 4) errs.password = 'يرجى تعيين كلمة سر لا تقل عن 4 خانات';
@@ -50,50 +50,38 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
       return;
     }
 
-    const fullName = `${firstName.trim()} ${lastName.trim()}`;
-    const newStudentId = `std-${Date.now().toString().slice(-4)}`;
-    const finalUsername = email.trim().split('@')[0] || phone.replace(/\D/g, '').slice(-6) || `std_${Date.now().toString().slice(-4)}`;
+    const fullName = `أ. ${firstName.trim()} ${lastName.trim()}`;
+    const newTeacherId = `tch-${Date.now().toString().slice(-4)}`;
+    const finalUsername = email.trim().split('@')[0] || `prof_${phone.replace(/\D/g, '').slice(-4)}`;
 
-    const studentUser: AppUser = {
-      id: `usr-${newStudentId}`,
-      role: 'student',
+    const teacherUser: AppUser = {
+      id: `usr-${newTeacherId}`,
+      role: 'teacher',
       username: finalUsername,
       phone: phone.trim(),
       email: email.trim(),
       password: password.trim(),
       fullName: fullName,
-      relatedId: newStudentId,
-      stream: 'علوم تجريبية',
-      wilaya: 'إن صالح',
-      recoveryEmail: email.trim(),
+      relatedId: newTeacherId,
+      subject: 'أستاذ متطوع',
     };
 
-    const newStudent: Student = {
-      id: newStudentId,
+    const newTeacher: Teacher = {
+      id: newTeacherId,
       fullName: fullName,
       username: finalUsername,
       email: email.trim(),
       password: password.trim(),
-      stream: 'علوم تجريبية',
-      educationLevel: 'BAC',
       phone: phone.trim(),
-      parentPhone: phone.trim(),
-      wilaya: 'إن صالح',
-      highSchool: 'ثانوية معتمدة',
-      enrolledSubjects: ['الرياضيات', 'العلوم الفيزيائية', 'علوم الطبيعة والحياة'],
-      attendanceRate: 100,
-      averageScore: 12.0,
-      weaknesses: [],
-      strengths: [],
-      monthlyProgression: [
-        { month: 'أكتوبر 2026', attendance: 100, score: 12.0 },
-      ],
-      registrationDate: new Date().toISOString().split('T')[0],
-      notes: 'تلميذ مسجل بدار الشباب الشهيد بوجمعة.',
-      avatarSeed: finalUsername,
+      subject: 'أستاذ مؤطر متطوع',
+      coveredStreams: ['علوم تجريبية', 'رياضيات', 'تقني رياضي'],
+      bio: 'أستاذ متطوع متميز في مبادرة جمعية بذرة غد.',
+      volunteerHours: 0,
+      centerName: 'دار الشباب الشهيد بوجمعة',
+      activeSessionsCount: 0,
     };
 
-    onRegister(newStudent, studentUser);
+    onRegister(newTeacher, teacherUser);
     setSuccessMessage(true);
 
     setTimeout(() => {
@@ -128,13 +116,13 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <h2 className="text-base sm:text-lg font-black text-stone-900 tracking-tight flex items-center gap-1.5">
-                <GraduationCap className="w-5 h-5 text-emerald-700" />
-                <span>تسجيل تلميذ جديد</span>
+                <School className="w-5 h-5 text-emerald-700" />
+                <span>تسجيل أستاذ جديد</span>
               </h2>
-              <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md">مجاني</span>
+              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-md">تطوع وتأطير</span>
             </div>
             <p className="text-[11px] sm:text-xs text-stone-500 mt-0.5 leading-snug">
-              جمعية بذرة غد الشبانية · إنشاء حساب التلميذ والبطاقة الرقمية فوراً
+              جمعية بذرة غد الشبانية · الانضمام إلى فريق الأساتذة المؤطرين بدار الشباب
             </p>
           </div>
         </div>
@@ -142,15 +130,15 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
         {successMessage ? (
           <div className="py-10 flex flex-col items-center justify-center text-center space-y-3">
             <CheckCircle2 className="w-14 h-14 text-emerald-600 animate-bounce" />
-            <h3 className="text-base sm:text-lg font-black text-stone-900">تم تسجيل حساب التلميذ بنجاح!</h3>
+            <h3 className="text-base sm:text-lg font-black text-stone-900">تم تسجيل حساب الأستاذ بنجاح!</h3>
             <p className="text-xs text-stone-600 max-w-sm leading-relaxed">
-              تم إنشاء حسابك وتفعيل بطاقتك الرقمية الرسمية وإشعار إدارة الجمعية فوراً.
+              أهلاً بك في منصة بذرة غد! تم تفعيل فضاء الأستاذ وإشعار إدارة الجمعية.
             </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             
-            {/* 1. First & Last Name (الاسم واللقب) */}
+            {/* 1. Name & Surname (الاسم واللقب) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-stone-800 mb-1">
@@ -164,7 +152,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                       setFirstName(e.target.value);
                       if (errors.name) setErrors({ ...errors, name: '' });
                     }}
-                    placeholder="مثال: يونس"
+                    placeholder="مثال: عبد القادر"
                     className="w-full pr-10 pl-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs sm:text-sm text-stone-900 focus:bg-white focus:border-emerald-600 focus:outline-hidden font-medium transition-colors"
                   />
                   <User className="w-4 h-4 text-stone-400 absolute right-3.5 top-3" />
@@ -183,7 +171,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                       setLastName(e.target.value);
                       if (errors.name) setErrors({ ...errors, name: '' });
                     }}
-                    placeholder="مثال: بلحاج"
+                    placeholder="مثال: المنصوري"
                     className="w-full pr-10 pl-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs sm:text-sm text-stone-900 focus:bg-white focus:border-emerald-600 focus:outline-hidden font-medium transition-colors"
                   />
                   <User className="w-4 h-4 text-stone-400 absolute right-3.5 top-3" />
@@ -192,7 +180,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
             </div>
             {errors.name && <p className="text-xs text-rose-600 font-semibold">{errors.name}</p>}
 
-            {/* 2. Email (البريد الإلكتروني) */}
+            {/* 2. Email */}
             <div>
               <label className="block text-xs font-bold text-stone-800 mb-1">
                 البريد الإلكتروني <span className="text-rose-500">*</span>
@@ -205,7 +193,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                     setEmail(e.target.value);
                     if (errors.email) setErrors({ ...errors, email: '' });
                   }}
-                  placeholder="student@example.com"
+                  placeholder="prof@example.com"
                   dir="ltr"
                   className="w-full pr-10 pl-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs sm:text-sm text-stone-900 focus:bg-white focus:border-emerald-600 focus:outline-hidden font-mono transition-colors text-left"
                 />
@@ -214,7 +202,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               {errors.email && <p className="text-xs text-rose-600 mt-1 font-semibold">{errors.email}</p>}
             </div>
 
-            {/* 3. Phone (رقم الهاتف) */}
+            {/* 3. Phone */}
             <div>
               <label className="block text-xs font-bold text-stone-800 mb-1">
                 رقم الهاتف <span className="text-rose-500">*</span>
@@ -236,7 +224,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
               {errors.phone && <p className="text-xs text-rose-600 mt-1 font-semibold">{errors.phone}</p>}
             </div>
 
-            {/* 4. Password (كلمة السر) */}
+            {/* 4. Password */}
             <div>
               <label className="block text-xs font-bold text-stone-800 mb-1">
                 كلمة السر <span className="text-rose-500">*</span>
@@ -267,7 +255,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
 
             {/* Notice */}
             <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-[11px] text-stone-600 leading-relaxed">
-              🔒 <b>حساب فوري وآمن:</b> يتم حفظ بياناتك مباشرة وتوليد بطاقتك الرقمية الرسمية وإشعار الإدارة فوراً.
+              🔒 <b>فضاء الأستاذ المتطوع:</b> يتيح لك برمجة الحصص، رصد الحضور، تسجيل الملاحظات، ونشر المذكرات.
             </div>
 
             {/* Actions */}
@@ -284,7 +272,7 @@ export const StudentRegistrationModal: React.FC<StudentRegistrationModalProps> =
                 className="w-full sm:w-auto px-6 py-2.5 text-xs font-extrabold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>تأكيد التسجيل وإنشاء حسابي</span>
+                <span>تأكيد تسجيل الأستاذ</span>
               </button>
             </div>
 

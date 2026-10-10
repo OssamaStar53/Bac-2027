@@ -93,25 +93,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [recoverySuccess, setRecoverySuccess] = useState('');
   const [copiedCodeNotice, setCopiedCodeNotice] = useState(false);
 
-  // Student Register State
-  const [stdFullName, setStdFullName] = useState('');
-  const [stdUsername, setStdUsername] = useState('');
+  // Student Register State (Simplified: Name, Email, Phone, Password)
+  const [stdFirstName, setStdFirstName] = useState('');
+  const [stdLastName, setStdLastName] = useState('');
+  const [stdEmail, setStdEmail] = useState('');
   const [stdPhone, setStdPhone] = useState('');
-  const [stdParentPhone, setStdParentPhone] = useState('');
   const [stdPassword, setStdPassword] = useState('');
-  const [stdStream, setStdStream] = useState<BacStream>('علوم تجريبية');
-  const [stdSchool, setStdSchool] = useState('');
-  const [stdWilaya, setStdWilaya] = useState('الجزائر - براقي');
-  const [stdSubjects, setStdSubjects] = useState<string[]>(['الرياضيات', 'العلوم الفيزيائية']);
 
-  // Teacher Register State
-  const [tchFullName, setTchFullName] = useState('');
-  const [tchUsername, setTchUsername] = useState('');
+  // Teacher Register State (Simplified: Name, Email, Phone, Password)
+  const [tchFirstName, setTchFirstName] = useState('');
+  const [tchLastName, setTchLastName] = useState('');
+  const [tchEmail, setTchEmail] = useState('');
   const [tchPhone, setTchPhone] = useState('');
   const [tchPassword, setTchPassword] = useState('');
-  const [tchSubject, setTchSubject] = useState('الرياضيات');
-  const [tchCenter, setTchCenter] = useState('دار الشباب الشهيد بوجمعة');
-  const [tchBio, setTchBio] = useState('');
 
   const [regError, setRegError] = useState('');
   const [successNotice, setSuccessNotice] = useState('');
@@ -208,10 +202,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // Check Student
+    // Check Student (supports username, phone number, and email!)
     const matchedStudent = allStudents.find(
       (s) =>
-        (s.username?.toLowerCase() === query || s.phone === query) &&
+        (s.username?.toLowerCase() === query || s.phone === query || s.email?.toLowerCase() === query) &&
         (s.password === pwd)
     );
 
@@ -338,44 +332,62 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Student Registration
+  // Student Registration (Simplified: Name, Email, Phone, Password)
   const handleStudentRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError('');
 
-    if (!stdFullName.trim() || !stdPhone.trim() || !stdPassword.trim()) {
-      setRegError('يرجى ملء جميع الحقول المطلوبة');
+    if (!stdFirstName.trim() || !stdLastName.trim()) {
+      setRegError('يرجى إدخال اسم ولقب التلميذ');
+      return;
+    }
+    if (!stdEmail.trim() || !stdEmail.includes('@')) {
+      setRegError('يرجى إدخال بريد إلكتروني صحيح');
+      return;
+    }
+    if (!stdPhone.trim() || stdPhone.trim().length < 8) {
+      setRegError('يرجى إدخال رقم هاتف صحيح');
+      return;
+    }
+    if (!stdPassword.trim() || stdPassword.length < 4) {
+      setRegError('يرجى تعيين كلمة سر لا تقل عن 4 خانات');
       return;
     }
 
+    const fullName = `${stdFirstName.trim()} ${stdLastName.trim()}`;
     const newStudentId = `std-${Date.now().toString().slice(-4)}`;
+    const finalUsername = stdEmail.trim().split('@')[0] || `std_${stdPhone.slice(-4)}`;
+
     const studentUser: AppUser = {
       id: `usr-${newStudentId}`,
       role: 'student',
-      username: stdUsername.trim() || `std_${stdPhone.slice(-4)}`,
+      username: finalUsername,
       phone: stdPhone.trim(),
+      email: stdEmail.trim(),
       password: stdPassword.trim(),
-      fullName: stdFullName.trim(),
+      fullName: fullName,
       relatedId: newStudentId,
-      stream: stdStream,
-      wilaya: stdWilaya,
+      stream: 'علوم تجريبية',
+      wilaya: 'إن صالح',
     };
 
     const newStudent: Student = {
       id: newStudentId,
-      fullName: stdFullName.trim(),
+      fullName: fullName,
       username: studentUser.username,
+      email: stdEmail.trim(),
       password: stdPassword.trim(),
-      stream: stdStream,
+      stream: 'علوم تجريبية',
+      educationLevel: 'BAC',
       phone: stdPhone.trim(),
-      parentPhone: stdParentPhone.trim() || stdPhone.trim(),
-      wilaya: stdWilaya,
-      highSchool: stdSchool.trim() || 'ثانوية معتمدة',
-      enrolledSubjects: stdSubjects,
+      parentPhone: stdPhone.trim(),
+      wilaya: 'إن صالح',
+      highSchool: 'ثانوية معتمدة',
+      enrolledSubjects: ['الرياضيات', 'العلوم الفيزيائية', 'علوم الطبيعة والحياة'],
       attendanceRate: 100,
       averageScore: 12.0,
       weaknesses: [],
-      strengths: [stdSubjects[0] || 'المواد العلمية'],
+      strengths: ['المواد العلمية'],
       monthlyProgression: [
         { month: 'أكتوبر 2026', attendance: 100, score: 12.0 },
       ],
@@ -388,40 +400,56 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     onClose();
   };
 
-  // Teacher Registration
+  // Teacher Registration (Simplified: Name, Email, Phone, Password)
   const handleTeacherRegisterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setRegError('');
 
-    if (!tchFullName.trim() || !tchPhone.trim() || !tchPassword.trim()) {
-      setRegError('يرجى إكمال بيانات الأستاذ');
+    if (!tchFirstName.trim() || !tchLastName.trim()) {
+      setRegError('يرجى إدخال اسم ولقب الأستاذ');
+      return;
+    }
+    if (!tchEmail.trim() || !tchEmail.includes('@')) {
+      setRegError('يرجى إدخال بريد إلكتروني صحيح');
+      return;
+    }
+    if (!tchPhone.trim() || tchPhone.trim().length < 8) {
+      setRegError('يرجى إدخال رقم هاتف صحيح');
+      return;
+    }
+    if (!tchPassword.trim() || tchPassword.length < 4) {
+      setRegError('يرجى تعيين كلمة سر لا تقل عن 4 خانات');
       return;
     }
 
+    const fullName = `أ. ${tchFirstName.trim()} ${tchLastName.trim()}`;
     const newTeacherId = `tch-${Date.now().toString().slice(-4)}`;
+    const finalUsername = tchEmail.trim().split('@')[0] || `prof_${tchPhone.slice(-4)}`;
+
     const teacherUser: AppUser = {
       id: `usr-${newTeacherId}`,
       role: 'teacher',
-      username: tchUsername.trim() || `prof_${tchPhone.slice(-4)}`,
+      username: finalUsername,
       phone: tchPhone.trim(),
+      email: tchEmail.trim(),
       password: tchPassword.trim(),
-      fullName: tchFullName.trim(),
+      fullName: fullName,
       relatedId: newTeacherId,
-      subject: tchSubject,
+      subject: 'أستاذ متطوع',
     };
 
     const newTeacher: Teacher = {
       id: newTeacherId,
-      fullName: tchFullName.trim(),
+      fullName: fullName,
       username: teacherUser.username,
+      email: tchEmail.trim(),
       password: tchPassword.trim(),
-      subject: tchSubject,
+      subject: 'أستاذ مؤطر متطوع',
       coveredStreams: ['علوم تجريبية', 'رياضيات', 'تقني رياضي'],
       phone: tchPhone.trim(),
-      email: `${teacherUser.username}@badhrat-ghad.dz`,
-      bio: tchBio.trim() || 'أستاذ متطوع متميز في المبادرة.',
+      bio: 'أستاذ متطوع متميز في المبادرة.',
       volunteerHours: 0,
-      centerName: tchCenter,
+      centerName: 'دار الشباب الشهيد بوجمعة',
       activeSessionsCount: 0,
     };
 
@@ -430,29 +458,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-stone-200 relative my-6">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/60 backdrop-blur-xs p-2.5 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+      <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full p-4 sm:p-7 shadow-2xl border border-stone-200 relative modal-scrollable max-h-[92dvh] overflow-y-auto text-right">
         
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute left-5 top-5 p-2 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+          className="absolute left-4 top-4 sm:left-5 sm:top-5 p-2 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer z-10"
+          aria-label="إغلاق"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Header Branding */}
-        <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-emerald-50 border border-emerald-200 rounded-2xl p-1 flex items-center justify-center mx-auto mb-2.5 shadow-xs">
-            <BadhraLogo size={42} />
+        <div className="text-center mb-5 sm:mb-6 pt-1">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 bg-emerald-50 border border-emerald-200 rounded-2xl p-1 flex items-center justify-center mx-auto mb-2 shadow-xs">
+            <BadhraLogo size={38} />
           </div>
-          <h2 className="text-xl font-extrabold text-stone-900 tracking-tight">
+          <h2 className="text-lg sm:text-xl font-extrabold text-stone-900 tracking-tight">
             {mode === 'login' && 'تسجيل الدخول إلى المنصة'}
             {mode === 'register_student' && 'حساب تلميذ جديد - BAC & BEM'}
             {mode === 'register_teacher' && 'انضمام كأستاذ متطوع'}
             {mode === 'forgot_password' && 'استرجاع كلمة السر عبر البريد الإلكتروني'}
           </h2>
-          <p className="text-xs text-stone-500 mt-1">
+          <p className="text-[11px] sm:text-xs text-stone-500 mt-1 leading-snug">
             {mode === 'forgot_password' 
               ? 'إرسال رابط آمن ورمز التحقق (OTP) إلى بريدك الإلكتروني لاستعادة حسابك'
               : 'المنصة الرقمية لجمعية بذرة غد الشبانية لمرافقة تلاميذ البكالوريا والتعليم المتوسط BEM'}
@@ -469,10 +498,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Tabs for Login vs Register */}
         {mode !== 'forgot_password' && (
-          <div className="grid grid-cols-3 gap-1 bg-stone-100 p-1 rounded-2xl mb-5 text-xs font-bold text-center">
+          <div className="grid grid-cols-3 gap-1 bg-stone-100 p-1 rounded-2xl mb-5 text-[10px] sm:text-xs font-bold text-center">
             <button
               onClick={() => { setMode('login'); setLoginError(''); }}
-              className={`py-2 rounded-xl transition-all cursor-pointer ${
+              className={`py-2 px-1 rounded-xl transition-all cursor-pointer ${
                 mode === 'login' ? 'bg-white text-emerald-950 shadow-xs' : 'text-stone-600 hover:text-stone-900'
               }`}
             >
@@ -480,19 +509,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </button>
             <button
               onClick={() => { setMode('register_student'); setRegError(''); }}
-              className={`py-2 rounded-xl transition-all cursor-pointer ${
+              className={`py-2 px-1 rounded-xl transition-all cursor-pointer ${
                 mode === 'register_student' ? 'bg-white text-emerald-950 shadow-xs' : 'text-stone-600 hover:text-stone-900'
               }`}
             >
-              تسجيل تلميذ
+              تسجيل التلاميذ
             </button>
             <button
               onClick={() => { setMode('register_teacher'); setRegError(''); }}
-              className={`py-2 rounded-xl transition-all cursor-pointer ${
+              className={`py-2 px-1 rounded-xl transition-all cursor-pointer ${
                 mode === 'register_teacher' ? 'bg-white text-emerald-950 shadow-xs' : 'text-stone-600 hover:text-stone-900'
               }`}
             >
-              تسجيل أستاذ
+              تسجيل الأساتذة
             </button>
           </div>
         )}
@@ -513,44 +542,44 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <label className="block text-xs font-semibold text-stone-700 mb-1.5">
                 تحديد نوع الحساب:
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                 <button
                   type="button"
                   onClick={() => setSelectedRole('student')}
-                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                  className={`p-2 sm:p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                     selectedRole === 'student'
                       ? 'border-emerald-600 bg-emerald-50 text-emerald-950 font-bold ring-2 ring-emerald-600'
                       : 'border-stone-200 hover:bg-stone-50 text-stone-700'
                   }`}
                 >
                   <GraduationCap className="w-4 h-4 text-emerald-700" />
-                  <span className="text-xs">تلميذ</span>
+                  <span className="text-[11px] sm:text-xs">تلميذ</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSelectedRole('teacher')}
-                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                  className={`p-2 sm:p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                     selectedRole === 'teacher'
                       ? 'border-emerald-600 bg-emerald-50 text-emerald-950 font-bold ring-2 ring-emerald-600'
                       : 'border-stone-200 hover:bg-stone-50 text-stone-700'
                   }`}
                 >
                   <School className="w-4 h-4 text-emerald-700" />
-                  <span className="text-xs">أستاذ متطوع</span>
+                  <span className="text-[11px] sm:text-xs">أستاذ</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSelectedRole('association_admin')}
-                  className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                  className={`p-2 sm:p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1 ${
                     selectedRole === 'association_admin'
                       ? 'border-stone-900 bg-stone-900 text-white font-bold ring-2 ring-stone-900'
                       : 'border-stone-200 hover:bg-stone-50 text-stone-700'
                   }`}
                 >
                   <ShieldCheck className="w-4 h-4 text-amber-500" />
-                  <span className="text-xs">إدارة الجمعية</span>
+                  <span className="text-[11px] sm:text-xs">الإدارة</span>
                 </button>
               </div>
             </div>
@@ -976,76 +1005,78 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             )}
 
+            {/* 1. Name and Surname */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">الاسم:</label>
+                <input
+                  type="text"
+                  value={stdFirstName}
+                  onChange={(e) => setStdFirstName(e.target.value)}
+                  placeholder="مثال: يونس"
+                  required
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">اللقب:</label>
+                <input
+                  type="text"
+                  value={stdLastName}
+                  onChange={(e) => setStdLastName(e.target.value)}
+                  placeholder="مثال: بلحاج"
+                  required
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
+                />
+              </div>
+            </div>
+
+            {/* 2. Email */}
             <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">الاسم الكامل للتلميذ:</label>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">البريد الإلكتروني (الإيميل):</label>
               <input
-                type="text"
-                value={stdFullName}
-                onChange={(e) => setStdFullName(e.target.value)}
-                placeholder="مثال: يونس بوقرة"
+                type="email"
+                value={stdEmail}
+                onChange={(e) => setStdEmail(e.target.value)}
+                placeholder="student@example.com"
                 required
-                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-mono"
+                dir="ltr"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">اسم المستخدم:</label>
-                <input
-                  type="text"
-                  value={stdUsername}
-                  onChange={(e) => setStdUsername(e.target.value)}
-                  placeholder="younes"
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">الشعبة:</label>
-                <select
-                  value={stdStream}
-                  onChange={(e) => setStdStream(e.target.value as BacStream)}
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
-                >
-                  {ALL_STREAMS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
+            {/* 3. Phone */}
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">رقم الهاتف:</label>
+              <input
+                type="tel"
+                value={stdPhone}
+                onChange={(e) => setStdPhone(e.target.value)}
+                placeholder="06XXXXXXXX"
+                required
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-mono"
+                dir="ltr"
+              />
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">رقم هاتف التلميذ:</label>
-                <input
-                  type="tel"
-                  value={stdPhone}
-                  onChange={(e) => setStdPhone(e.target.value)}
-                  placeholder="0661000000"
-                  required
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-mono"
-                  dir="ltr"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">كلمة السر:</label>
-                <input
-                  type="password"
-                  value={stdPassword}
-                  onChange={(e) => setStdPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
-                />
-              </div>
+            {/* 4. Password */}
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">كلمة السر:</label>
+              <input
+                type="password"
+                value={stdPassword}
+                onChange={(e) => setStdPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
+              />
             </div>
 
             <button
               type="submit"
               className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs mt-2"
             >
-              إنشاء الحساب والانضمام لحصص الدعم
+              تأكيد تسجيل التلميذ وإنشاء الحساب
             </button>
           </form>
         )}
@@ -1060,45 +1091,61 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             )}
 
-            <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">الاسم الكامل للأستاذ:</label>
-              <input
-                type="text"
-                value={tchFullName}
-                onChange={(e) => setTchFullName(e.target.value)}
-                placeholder="أ. عبد الرحمن مصطفاوي"
-                required
-                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
+            {/* 1. Name and Surname */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">المادة المدرسة:</label>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">الاسم:</label>
                 <input
                   type="text"
-                  value={tchSubject}
-                  onChange={(e) => setTchSubject(e.target.value)}
-                  placeholder="الرياضيات"
+                  value={tchFirstName}
+                  onChange={(e) => setTchFirstName(e.target.value)}
+                  placeholder="مثال: عبد القادر"
                   required
                   className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
                 />
               </div>
-
               <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">رقم الهاتف:</label>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">اللقب:</label>
                 <input
-                  type="tel"
-                  value={tchPhone}
-                  onChange={(e) => setTchPhone(e.target.value)}
-                  placeholder="0550000000"
+                  type="text"
+                  value={tchLastName}
+                  onChange={(e) => setTchLastName(e.target.value)}
+                  placeholder="مثال: المنصوري"
                   required
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-mono"
-                  dir="ltr"
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
                 />
               </div>
             </div>
 
+            {/* 2. Email */}
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">البريد الإلكتروني (الإيميل):</label>
+              <input
+                type="email"
+                value={tchEmail}
+                onChange={(e) => setTchEmail(e.target.value)}
+                placeholder="teacher@example.com"
+                required
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-mono"
+                dir="ltr"
+              />
+            </div>
+
+            {/* 3. Phone */}
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">رقم الهاتف:</label>
+              <input
+                type="tel"
+                value={tchPhone}
+                onChange={(e) => setTchPhone(e.target.value)}
+                placeholder="05XXXXXXXX"
+                required
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-mono"
+                dir="ltr"
+              />
+            </div>
+
+            {/* 4. Password */}
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">كلمة السر:</label>
               <input
@@ -1115,12 +1162,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               type="submit"
               className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs mt-2"
             >
-              تأكيد التسجيل وتفعيل فضاء الأستاذ
+              تأكيد تسجيل الأستاذ وتفعيل فضاء الأستاذ
             </button>
           </form>
         )}
 
+        </div>
       </div>
-    </div>
   );
 };

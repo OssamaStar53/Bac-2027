@@ -350,18 +350,13 @@ export const QuizView: React.FC<QuizViewProps> = ({
                 <p className="text-[11px] text-amber-800">
                   يرجى تسجيل الدخول أو إنشاء حساب تلميذ لتسجيل نتيجتك ونقاط الضعف في بطاقتك.
                 </p>
-                <div className="flex items-center justify-center gap-2 pt-1">
+                <div className="flex items-center justify-center pt-1">
                   <button
                     onClick={onOpenAuth}
-                    className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+                    className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 shadow-xs"
                   >
-                    تسجيل الدخول
-                  </button>
-                  <button
-                    onClick={onOpenRegister}
-                    className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold cursor-pointer"
-                  >
-                    تسجيل تلميذ جديد
+                    <LogIn className="w-4 h-4" />
+                    <span>تسجيل الدخول لحفظ نتيجتك وبدء الاختبار</span>
                   </button>
                 </div>
               </div>

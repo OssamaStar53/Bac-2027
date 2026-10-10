@@ -352,4 +352,47 @@ export const api = {
       return null;
     }
   },
+
+  // Save Notification (Persisted across devices & site updates)
+  async addNotification(notif: AppNotification) {
+    try {
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(notif),
+      });
+    } catch (e) {}
+  },
+
+  // Mark all notifications read
+  async markAllNotificationsRead() {
+    try {
+      await fetch('/api/notifications/mark-all-read', {
+        method: 'PATCH',
+      });
+    } catch (e) {}
+  },
+
+  // Delete notification
+  async deleteNotification(id: string) {
+    try {
+      await fetch(`/api/notifications/${id}`, {
+        method: 'DELETE',
+      });
+    } catch (e) {}
+  },
+
+  // WhatsApp Channel & Automated Broadcast
+  async broadcastWhatsApp(text: string, channelUrl?: string) {
+    try {
+      const res = await fetch('/api/whatsapp/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, channelUrl }),
+      });
+      return await res.json();
+    } catch (e) {
+      return { success: false, error: 'تعذر الاتصال بخدمة الواتساب' };
+    }
+  },
 };

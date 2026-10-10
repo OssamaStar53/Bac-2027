@@ -25,7 +25,9 @@ import {
   GraduationCap,
   Trash2,
   EyeOff,
-  Eye
+  Eye,
+  CalendarPlus,
+  X
 } from 'lucide-react';
 
 interface ScheduleViewProps {
@@ -36,6 +38,7 @@ interface ScheduleViewProps {
   onOpenTeacherSpace: () => void;
   onOpenRegister: () => void;
   onOpenAuth: () => void;
+  onAddSession?: (session: SupportSession) => void;
   onDeleteSession?: (sessionId: string) => void;
   onToggleHideSession?: (sessionId: string) => void;
 }
@@ -59,10 +62,70 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
   onOpenTeacherSpace,
   onOpenRegister,
   onOpenAuth,
+  onAddSession,
   onDeleteSession,
   onToggleHideSession,
 }) => {
   const isManager = currentUser?.role === 'teacher' || currentUser?.role === 'association_admin';
+
+  // Add Session Modal State (mobile and desktop friendly)
+  const [isAddSessionOpen, setIsAddSessionOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newSubject, setNewSubject] = useState('الرياضيات');
+  const [newLevel, setNewLevel] = useState<'BAC' | 'BEM'>('BAC');
+  const [newStream, setNewStream] = useState<BacStream>('علوم تجريبية');
+  const [newTeacherName, setNewTeacherName] = useState(currentUser?.fullName || (teachers[0]?.fullName || 'أستاذ متطوع'));
+  const [newDate, setNewDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [newTimeText, setNewTimeText] = useState('الجمعة بعد صلاة المغرب (18:30 - 20:00)');
+  const [newLocation, setNewLocation] = useState('دار الشباب الشهيد بوجمعة - قاعة المحاضرات');
+  const [newDescription, setNewDescription] = useState('');
+  const [showRoleNoticeModal, setShowRoleNoticeModal] = useState(false);
+
+  const isTeacherOrAdmin = Boolean(
+    currentUser && (currentUser.role === 'teacher' || currentUser.role === 'association_admin')
+  );
+
+  const handleOpenAddSession = () => {
+    if (!currentUser) {
+      onOpenAuth();
+      return;
+    }
+    if (currentUser.role !== 'teacher' && currentUser.role !== 'association_admin') {
+      setShowRoleNoticeModal(true);
+      return;
+    }
+    setIsAddSessionOpen(true);
+  };
+
+  const handleCreateSessionSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) return;
+
+    const teacherObj = teachers.find(t => t.fullName === newTeacherName) || teachers[0];
+
+    const sessionObj: SupportSession = {
+      id: `ses-${Date.now().toString().slice(-4)}`,
+      title: newTitle.trim(),
+      subject: newSubject,
+      stream: newStream,
+      educationLevel: newLevel,
+      teacherId: teacherObj?.id || currentUser?.relatedId || 'tch-001',
+      teacherName: newTeacherName.trim(),
+      date: newDate,
+      timeText: newTimeText.trim(),
+      location: newLocation.trim(),
+      description: newDescription.trim() || 'حصة دعم ومراجعة بيداغوجية مكثفة.',
+      completed: false,
+      attendance: {},
+    };
+
+    if (onAddSession) {
+      onAddSession(sessionObj);
+    }
+    setIsAddSessionOpen(false);
+    setNewTitle('');
+    setNewDescription('');
+  };
 
   // If student is logged in, default stream filter to their enrolled stream
   const [selectedLevel, setSelectedLevel] = useState<'all' | 'BAC' | 'BEM'>('all');
@@ -154,18 +217,13 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="shrink-0 w-full sm:w-auto">
             <button
               onClick={onOpenAuth}
-              className="px-3.5 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl font-bold cursor-pointer transition-colors"
+              className="w-full sm:w-auto px-5 py-2.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors text-center flex items-center justify-center gap-1.5"
             >
-              تسجيل الدخول
-            </button>
-            <button
-              onClick={onOpenRegister}
-              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold cursor-pointer transition-colors"
-            >
-              تسجيل حساب جديد
+              <LogIn className="w-4 h-4 text-amber-300" />
+              <span>تسجيل الدخول للمتابعة</span>
             </button>
           </div>
         </div>
@@ -208,26 +266,27 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
             {!currentUser ? (
-              <>
-                <button
-                  onClick={onOpenRegister}
-                  className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-emerald-950 font-extrabold text-xs sm:text-sm rounded-xl shadow-xs transition-colors cursor-pointer"
-                >
-                  تسجيل تلميذ جديد مجاناً
-                </button>
-                <button
-                  onClick={onOpenAuth}
-                  className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white font-semibold text-xs sm:text-sm rounded-xl border border-white/20 transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <LogIn className="w-4 h-4" />
-                  <span>دخول المسجلين</span>
-                </button>
-              </>
+              <button
+                onClick={onOpenAuth}
+                className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-emerald-950 font-extrabold text-xs sm:text-sm rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>دخول المنصة وحجز المقاعد</span>
+              </button>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs bg-white/15 px-3 py-1.5 rounded-lg border border-white/20">
                   مرحباً بك: <b>{currentUser.fullName}</b>
                 </span>
+                {(currentUser.role === 'teacher' || currentUser.role === 'association_admin') && (
+                  <button
+                    onClick={handleOpenAddSession}
+                    className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-stone-950 font-black text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <CalendarPlus className="w-4 h-4 text-stone-900" />
+                    <span>+ إضافة حصة دعم جديدة</span>
+                  </button>
+                )}
                 {currentUser.role === 'teacher' && (
                   <button
                     onClick={onOpenTeacherSpace}
@@ -324,7 +383,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
           </div>
 
           {/* Search Input */}
-          <div className="relative min-w-[240px]">
+          <div className="relative w-full md:w-auto md:min-w-[240px]">
             <Search className="w-4 h-4 text-stone-400 absolute right-3 top-2.5" />
             <input
               type="text"
@@ -340,9 +399,21 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
       {/* Sessions Grid */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between text-xs text-stone-500 mb-2">
-          <span>الحصص المبرمجة ({filteredSessions.length})</span>
-          <span>المقر: دار الشباب الشهيد بوجمعة</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500 mb-2">
+          <div className="flex items-center gap-3">
+            <span className="font-bold text-stone-700">الحصص المبرمجة ({filteredSessions.length})</span>
+            <span>· المقر: دار الشباب الشهيد بوجمعة</span>
+          </div>
+
+          {isTeacherOrAdmin && (
+            <button
+              onClick={handleOpenAddSession}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-xs transition-colors cursor-pointer"
+            >
+              <CalendarPlus className="w-3.5 h-3.5 text-amber-300" />
+              <span>+ إضافة حصة دعم جديدة</span>
+            </button>
+          )}
         </div>
 
         {filteredSessions.length === 0 ? (
@@ -542,8 +613,9 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
       {/* Digital QR Entry Pass Modal for Booked Session */}
       {activeSessionPass && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 text-center shadow-2xl border border-stone-200 relative">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/60 backdrop-blur-xs p-3 sm:p-4">
+          <div className="min-h-full flex items-center justify-center py-4">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-5 sm:p-6 text-center shadow-2xl border border-stone-200 relative">
             <div className="w-12 h-12 bg-emerald-100 text-emerald-800 rounded-2xl flex items-center justify-center mx-auto mb-3">
               <QrCode className="w-7 h-7" />
             </div>
@@ -580,20 +652,22 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
             <button
               onClick={() => setActiveSessionPass(null)}
-              className="mt-5 w-full py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold cursor-pointer"
+              className="mt-5 w-full py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold cursor-pointer"
             >
               إغلاق البطاقة
             </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Suggestions and Roadmap Modal */}
       {showSuggestionsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 text-right shadow-2xl border border-stone-200 relative my-8">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/60 backdrop-blur-xs p-3 sm:p-4">
+          <div className="min-h-full flex items-center justify-center py-4">
+            <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full p-4.5 sm:p-6 text-right shadow-2xl border border-stone-200 relative">
             <div className="flex items-center gap-3 pb-3 border-b border-stone-100 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
                 <Lightbulb className="w-5 h-5" />
               </div>
               <div>
@@ -641,10 +715,265 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
             <button
               onClick={() => setShowSuggestionsModal(false)}
-              className="mt-5 w-full py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+              className="mt-5 w-full py-2.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold cursor-pointer"
             >
               تم، العودة إلى البرنامج
             </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Add Session Action Button on Mobile (Teachers & Admin ONLY) */}
+      {isTeacherOrAdmin && (
+        <div className="md:hidden fixed bottom-6 left-5 z-40">
+          <button
+            onClick={handleOpenAddSession}
+            className="flex items-center gap-2 px-4.5 py-3.5 bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-black text-xs rounded-full shadow-2xl border-2 border-emerald-400 cursor-pointer"
+            title="إضافة حصة دعم جديدة"
+          >
+            <CalendarPlus className="w-5 h-5 text-amber-300" />
+            <span>إضافة حصة</span>
+          </button>
+        </div>
+      )}
+
+      {/* Role Notice Modal when student attempts to add session */}
+      {showRoleNoticeModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/60 backdrop-blur-xs p-3 sm:p-6 flex flex-col justify-start sm:justify-center items-center py-6">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-md w-full p-6 shadow-2xl border border-stone-200 text-center space-y-4 my-auto">
+            <div className="w-14 h-14 bg-amber-50 text-amber-700 rounded-2xl flex items-center justify-center mx-auto">
+              <CalendarPlus className="w-7 h-7 text-amber-600" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-stone-900">برمجة الحصص مخصصة للأساتذة والإدارة</h3>
+              <p className="text-xs text-stone-600 mt-2 leading-relaxed">
+                حسابك الحالي مسجل كـ <b>تلميذ</b>. إضافة وتعديل حصص الدعم وتحديد التوقيت متاح حصرياً للأساتذة المؤطرين المتطوعين وإدارة جمعية بذرة غد.
+              </p>
+            </div>
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowRoleNoticeModal(false)}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-xl cursor-pointer"
+              >
+                فهمت، العودة للجدول
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRoleNoticeModal(false);
+                  onOpenAuth();
+                }}
+                className="w-full sm:w-auto px-5 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl cursor-pointer"
+              >
+                دخول كأستاذ أو إدارة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile-Friendly Add Session Modal Dialog */}
+      {isAddSessionOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/60 backdrop-blur-xs p-2.5 sm:p-4 flex flex-col justify-start sm:justify-center items-center py-4 sm:py-8">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full p-4.5 sm:p-7 shadow-2xl border border-stone-200 relative text-right modal-scrollable max-h-[92dvh] overflow-y-auto">
+            
+            <button
+              onClick={() => setIsAddSessionOpen(false)}
+              className="absolute left-4 top-4 p-2 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer z-10"
+              aria-label="إغلاق"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-5 pb-3 border-b border-stone-100">
+              <div className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                <CalendarPlus className="w-6 h-6 text-emerald-700" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-stone-900">برمجة حصة دعم جديدة</h3>
+                <p className="text-xs text-stone-500">حدد بيانات الحصة لنشرها بدار الشباب وبثها تلقائياً</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleCreateSessionSubmit} className="space-y-3.5">
+              
+              {/* Level Selector */}
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  الطور التعليمي <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setNewLevel('BAC'); setNewStream('علوم تجريبية'); }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      newLevel === 'BAC'
+                        ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
+                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                    }`}
+                  >
+                    <GraduationCap className="w-4 h-4" />
+                    <span>بكالوريا (BAC)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => { setNewLevel('BEM'); setNewStream('السنة الرابعة متوسط (BEM)'); }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      newLevel === 'BEM'
+                        ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                    }`}
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>تعليم متوسط (BEM)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Title / Topic */}
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  عنوان الحصة أو موضوع الدرس <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="مثال: مراجعة شاملة في الدوال الأسية وتمارين نموذجية"
+                  required
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-emerald-600 font-medium"
+                />
+              </div>
+
+              {/* Subject & Stream */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">المادة:</label>
+                  <select
+                    value={newSubject}
+                    onChange={(e) => setNewSubject(e.target.value)}
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-medium"
+                  >
+                    <option value="الرياضيات">الرياضيات</option>
+                    <option value="العلوم الفيزيائية">العلوم الفيزيائية</option>
+                    <option value="علوم الطبيعة والحياة">علوم الطبيعة والحياة</option>
+                    <option value="اللغة العربية وآدابها">اللغة العربية وآدابها</option>
+                    <option value="الفلسفة">الفلسفة</option>
+                    <option value="التاريخ والجغرافيا">التاريخ والجغرافيا</option>
+                    <option value="اللغة الإنجليزية">اللغة الإنجليزية</option>
+                    <option value="اللغة الفرنسية">اللغة الفرنسية</option>
+                    <option value="العلوم الإسلامية">العلوم الإسلامية</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">الشعبة المستهدفة:</label>
+                  <select
+                    value={newStream}
+                    onChange={(e) => setNewStream(e.target.value as BacStream)}
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-medium"
+                  >
+                    {newLevel === 'BEM' ? (
+                      <option value="السنة الرابعة متوسط (BEM)">السنة الرابعة متوسط (BEM)</option>
+                    ) : (
+                      <>
+                        <option value="علوم تجريبية">علوم تجريبية</option>
+                        <option value="رياضيات">رياضيات</option>
+                        <option value="تقني رياضي">تقني رياضي</option>
+                        <option value="تسيير واقتصاد">تسيير واقتصاد</option>
+                        <option value="آداب وفلسفة">آداب وفلسفة</option>
+                        <option value="لغات أجنبية">لغات أجنبية</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              {/* Teacher & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">الأستاذ المؤطر:</label>
+                  <input
+                    type="text"
+                    value={newTeacherName}
+                    onChange={(e) => setNewTeacherName(e.target.value)}
+                    placeholder="اسم الأستاذ"
+                    required
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">التاريخ:</label>
+                  <input
+                    type="date"
+                    value={newDate}
+                    onChange={(e) => setNewDate(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-medium font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Time text & Location */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">التوقيت بالتفصيل:</label>
+                  <input
+                    type="text"
+                    value={newTimeText}
+                    onChange={(e) => setNewTimeText(e.target.value)}
+                    placeholder="الجمعة بعد صلاة المغرب (18:30 - 20:00)"
+                    required
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">المقر والقاعة:</label>
+                  <input
+                    type="text"
+                    value={newLocation}
+                    onChange={(e) => setNewLocation(e.target.value)}
+                    placeholder="دار الشباب الشهيد بوجمعة"
+                    required
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">ملاحظات ومحاور الحصة (اختياري):</label>
+                <textarea
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder="ملاحظات حول الأدوات المطلوبة أو السلسلة المعالجة..."
+                  rows={2}
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden font-medium"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center justify-center gap-2"
+                >
+                  <CalendarPlus className="w-4 h-4 text-amber-300" />
+                  <span>تأكيد برمجة الحصة ونشرها</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAddSessionOpen(false)}
+                  className="py-3 px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

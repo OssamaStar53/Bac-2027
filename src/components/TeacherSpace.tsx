@@ -360,23 +360,50 @@ export const TeacherSpace: React.FC<TeacherSpaceProps> = ({
         </div>
       </div>
 
+      {/* Mobile Quick Action Pills for Easy Finger Tap */}
+      <div className="md:hidden grid grid-cols-2 gap-2 mb-4">
+        <button
+          onClick={() => setActiveSection('new_session')}
+          className={`p-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-2 border ${
+            activeSection === 'new_session'
+              ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
+              : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+          }`}
+        >
+          <CalendarPlus className="w-4 h-4 text-amber-400" />
+          <span>+ إضافة حصة دعم</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('attendance')}
+          className={`p-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-2 border ${
+            activeSection === 'attendance'
+              ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
+              : 'bg-stone-50 text-stone-800 border-stone-200'
+          }`}
+        >
+          <UserCheck className="w-4 h-4 text-emerald-700" />
+          <span>رصد الحضور</span>
+        </button>
+      </div>
+
       {/* Navigation Sub-Tabs */}
-      <div className="flex items-center gap-2 border-b border-stone-200 pb-3 mb-6 overflow-x-auto no-scrollbar">
+      <div className="flex items-center gap-2 border-b border-stone-200 pb-3 mb-6 overflow-x-auto no-scrollbar scroll-smooth">
         <button
           onClick={() => setActiveSection('teacher_alerts')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors whitespace-nowrap cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors whitespace-nowrap cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSection === 'teacher_alerts'
               ? 'bg-emerald-700 text-white shadow-xs'
               : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
           }`}
         >
           <BellRing className="w-4 h-4" />
-          <span>إشعارات وتنبيهات الأساتذة ({teacherSpecificNotifications.length})</span>
+          <span>إشعارات وتنبيهات ({teacherSpecificNotifications.length})</span>
         </button>
 
         <button
           onClick={() => setActiveSection('new_session')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors whitespace-nowrap cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors whitespace-nowrap cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSection === 'new_session'
               ? 'bg-emerald-700 text-white shadow-xs'
               : 'bg-stone-100 text-stone-600 hover:bg-stone-200'

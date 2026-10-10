@@ -2,7 +2,7 @@ import express, { type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { db as pgDb } from './src/db/index.ts';
+import { db as pgDb, withDbRetry } from './src/db/index.ts';
 import * as schema from './src/db/schema.ts';
 import { eq } from 'drizzle-orm';
 import { requireAuth, type AuthRequest } from './src/middleware/auth.ts';
@@ -45,19 +45,28 @@ function saveDatabase(data: any): boolean {
 
 // Seed Cloud SQL with existing data if empty (lazy execution, no eager startup loops)
 let isCloudSqlSeeded = false;
+let lastSeedAttemptTime = 0;
 async function ensureCloudSqlSeeded() {
   if (isCloudSqlSeeded || !process.env.SQL_HOST) return;
+  const now = Date.now();
+  if (now - lastSeedAttemptTime < 20000) return;
+  lastSeedAttemptTime = now;
+
   try {
     const dbData = loadDatabase();
     
     // Seed site settings if empty in Cloud SQL
     try {
-      const existingSettings = await pgDb.select().from(schema.siteSettingsTable).where(eq(schema.siteSettingsTable.id, 1));
+      const existingSettings = await withDbRetry(() =>
+        pgDb.select().from(schema.siteSettingsTable).where(eq(schema.siteSettingsTable.id, 1))
+      );
       if (existingSettings.length === 0 && dbData?.siteSettings) {
-        await pgDb.insert(schema.siteSettingsTable).values({
-          id: 1,
-          settings: dbData.siteSettings,
-        }).onConflictDoNothing();
+        await withDbRetry(() =>
+          pgDb.insert(schema.siteSettingsTable).values({
+            id: 1,
+            settings: dbData.siteSettings,
+          }).onConflictDoNothing()
+        );
       }
     } catch (e) {
       console.warn('Could not check or seed site_settings table:', e);
@@ -68,81 +77,89 @@ async function ensureCloudSqlSeeded() {
       const DEMO_STUDENT_IDS = ['std-001', 'std-002', 'std-003', 'std-004', 'std-005', 'std-006', 'std-007'];
       const DEMO_TEACHER_IDS = ['tch-001', 'tch-002', 'tch-003', 'tch-004', 'tch-005'];
       for (const id of DEMO_STUDENT_IDS) {
-        await pgDb.delete(schema.students).where(eq(schema.students.id, id));
+        await withDbRetry(() => pgDb.delete(schema.students).where(eq(schema.students.id, id)));
       }
       for (const id of DEMO_TEACHER_IDS) {
-        await pgDb.delete(schema.teachers).where(eq(schema.teachers.id, id));
+        await withDbRetry(() => pgDb.delete(schema.teachers).where(eq(schema.teachers.id, id)));
       }
     } catch (e) {}
 
-    const existing = await pgDb.select().from(schema.students).limit(1);
+    const existing = await withDbRetry(() => pgDb.select().from(schema.students).limit(1));
     if (existing.length === 0) {
       if (dbData) {
         if (dbData.students && dbData.students.length > 0) {
           for (const s of dbData.students) {
-            await pgDb.insert(schema.students).values({
-              id: s.id,
-              fullName: s.fullName,
-              username: s.username,
-              stream: s.stream,
-              educationLevel: s.educationLevel || (s.stream?.includes('BEM') ? 'BEM' : 'BAC'),
-              phone: s.phone,
-              parentPhone: s.parentPhone,
-              wilaya: s.wilaya,
-              highSchool: s.highSchool,
-              enrolledSubjects: s.enrolledSubjects,
-              attendanceRate: s.attendanceRate || 0,
-              averageScore: s.averageScore || 0,
-              weaknesses: s.weaknesses,
-              strengths: s.strengths,
-              monthlyProgression: s.monthlyProgression,
-              registrationDate: s.registrationDate,
-              notes: s.notes,
-              avatarSeed: s.avatarSeed,
-              avatarUrl: s.avatarUrl,
-              isHidden: !!s.isHidden,
-            }).onConflictDoNothing();
+            await withDbRetry(() =>
+              pgDb.insert(schema.students).values({
+                id: s.id,
+                fullName: s.fullName,
+                username: s.username,
+                password: s.password || null,
+                stream: s.stream,
+                educationLevel: s.educationLevel || (s.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+                phone: s.phone,
+                parentPhone: s.parentPhone,
+                wilaya: s.wilaya,
+                highSchool: s.highSchool,
+                enrolledSubjects: s.enrolledSubjects,
+                attendanceRate: s.attendanceRate || 0,
+                averageScore: s.averageScore || 0,
+                weaknesses: s.weaknesses,
+                strengths: s.strengths,
+                monthlyProgression: s.monthlyProgression,
+                registrationDate: s.registrationDate,
+                notes: s.notes,
+                avatarSeed: s.avatarSeed,
+                avatarUrl: s.avatarUrl,
+                isHidden: !!s.isHidden,
+              }).onConflictDoNothing()
+            );
           }
         }
         if (dbData.teachers && dbData.teachers.length > 0) {
           for (const t of dbData.teachers) {
-            await pgDb.insert(schema.teachers).values({
-              id: t.id,
-              fullName: t.fullName,
-              username: t.username,
-              subject: t.subject,
-              coveredStreams: t.coveredStreams,
-              phone: t.phone,
-              email: t.email,
-              bio: t.bio,
-              volunteerHours: t.volunteerHours || 0,
-              centerName: t.centerName,
-              activeSessionsCount: t.activeSessionsCount || 0,
-              avatarUrl: t.avatarUrl,
-              isHidden: !!t.isHidden,
-            }).onConflictDoNothing();
+            await withDbRetry(() =>
+              pgDb.insert(schema.teachers).values({
+                id: t.id,
+                fullName: t.fullName,
+                username: t.username,
+                password: t.password || null,
+                subject: t.subject,
+                coveredStreams: t.coveredStreams,
+                phone: t.phone,
+                email: t.email,
+                bio: t.bio,
+                volunteerHours: t.volunteerHours || 0,
+                centerName: t.centerName,
+                activeSessionsCount: t.activeSessionsCount || 0,
+                avatarUrl: t.avatarUrl,
+                isHidden: !!t.isHidden,
+              }).onConflictDoNothing()
+            );
           }
         }
         if (dbData.sessions && dbData.sessions.length > 0) {
           for (const ses of dbData.sessions) {
-            await pgDb.insert(schema.supportSessions).values({
-              id: ses.id,
-              title: ses.title,
-              subject: ses.subject,
-              stream: ses.stream,
-              educationLevel: ses.educationLevel || (ses.stream?.includes('BEM') ? 'BEM' : 'BAC'),
-              teacherId: ses.teacherId,
-              teacherName: ses.teacherName,
-              date: ses.date,
-              timeText: ses.timeText,
-              location: ses.location,
-              description: ses.description,
-              completed: !!ses.completed,
-              attendance: ses.attendance,
-              pedagogicalNotes: ses.pedagogicalNotes,
-              attachedResourceTitle: ses.attachedResourceTitle,
-              isHidden: !!ses.isHidden,
-            }).onConflictDoNothing();
+            await withDbRetry(() =>
+              pgDb.insert(schema.supportSessions).values({
+                id: ses.id,
+                title: ses.title,
+                subject: ses.subject,
+                stream: ses.stream,
+                educationLevel: ses.educationLevel || (ses.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+                teacherId: ses.teacherId,
+                teacherName: ses.teacherName,
+                date: ses.date,
+                timeText: ses.timeText,
+                location: ses.location,
+                description: ses.description,
+                completed: !!ses.completed,
+                attendance: ses.attendance,
+                pedagogicalNotes: ses.pedagogicalNotes,
+                attachedResourceTitle: ses.attachedResourceTitle,
+                isHidden: !!ses.isHidden,
+              }).onConflictDoNothing()
+            );
           }
         }
       }
@@ -161,7 +178,9 @@ async function sendTelegramServerMessage(text: string): Promise<{ ok: boolean; d
 
     if (process.env.SQL_HOST) {
       try {
-        const [saved] = await pgDb.select().from(schema.siteSettingsTable).where(eq(schema.siteSettingsTable.id, 1));
+        const [saved] = await withDbRetry(() =>
+          pgDb.select().from(schema.siteSettingsTable).where(eq(schema.siteSettingsTable.id, 1))
+        );
         if (saved?.settings) {
           const s = saved.settings as any;
           if (s.telegramBotEnabled) {
@@ -257,50 +276,88 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        // 1. Load persistent siteSettings from Cloud SQL
-        const [savedSettings] = await pgDb
-          .select()
-          .from(schema.siteSettingsTable)
-          .where(eq(schema.siteSettingsTable.id, 1));
-        if (savedSettings?.settings) {
-          db.siteSettings = { ...db.siteSettings, ...(savedSettings.settings as any) };
-        }
+        await Promise.allSettled([
+          // 1. Load persistent siteSettings from Cloud SQL
+          withDbRetry(async () => {
+            const [savedSettings] = await pgDb
+              .select()
+              .from(schema.siteSettingsTable)
+              .where(eq(schema.siteSettingsTable.id, 1));
+            if (savedSettings?.settings) {
+              db.siteSettings = { ...db.siteSettings, ...(savedSettings.settings as any) };
+            }
+          }),
 
-        // 2. Load students from Cloud SQL
-        const sqlStudents = await pgDb.select().from(schema.students);
-        if (sqlStudents && sqlStudents.length > 0) {
-          db.students = sqlStudents;
-        }
+          // 2. Load students from Cloud SQL
+          withDbRetry(async () => {
+            const sqlStudents = await pgDb.select().from(schema.students);
+            if (sqlStudents && sqlStudents.length > 0) {
+              db.students = sqlStudents;
+            }
+          }),
 
-        // 3. Load teachers from Cloud SQL
-        const sqlTeachers = await pgDb.select().from(schema.teachers);
-        if (sqlTeachers && sqlTeachers.length > 0) {
-          db.teachers = sqlTeachers;
-        }
+          // 3. Load teachers from Cloud SQL
+          withDbRetry(async () => {
+            const sqlTeachers = await pgDb.select().from(schema.teachers);
+            if (sqlTeachers && sqlTeachers.length > 0) {
+              db.teachers = sqlTeachers;
+            }
+          }),
 
-        // 4. Load sessions from Cloud SQL
-        const sqlSessions = await pgDb.select().from(schema.supportSessions);
-        if (sqlSessions && sqlSessions.length > 0) {
-          db.sessions = sqlSessions;
-        }
+          // 4. Load sessions from Cloud SQL and merge with file cache
+          withDbRetry(async () => {
+            const sqlSessions = await pgDb.select().from(schema.supportSessions);
+            if (sqlSessions && sqlSessions.length > 0) {
+              const mergedSessions = [...sqlSessions];
+              for (const s of (db.sessions || [])) {
+                if (!mergedSessions.some((m: any) => m.id === s.id)) {
+                  mergedSessions.push(s);
+                }
+              }
+              db.sessions = mergedSessions;
+            }
+          }),
 
-        // 5. Load resources from Cloud SQL
-        const sqlResources = await pgDb.select().from(schema.studyResources);
-        if (sqlResources && sqlResources.length > 0) {
-          db.resources = sqlResources;
-        }
+          // 5. Load resources from Cloud SQL
+          withDbRetry(async () => {
+            const sqlResources = await pgDb.select().from(schema.studyResources);
+            if (sqlResources && sqlResources.length > 0) {
+              db.resources = sqlResources;
+            }
+          }),
 
-        // 6. Load quizzes from Cloud SQL
-        const sqlQuizzes = await pgDb.select().from(schema.quizzes);
-        if (sqlQuizzes && sqlQuizzes.length > 0) {
-          db.quizzes = sqlQuizzes;
-        }
+          // 6. Load quizzes from Cloud SQL
+          withDbRetry(async () => {
+            const sqlQuizzes = await pgDb.select().from(schema.quizzes);
+            if (sqlQuizzes && sqlQuizzes.length > 0) {
+              db.quizzes = sqlQuizzes;
+            }
+          }),
 
-        // 7. Load activity logs from Cloud SQL
-        const sqlLogs = await pgDb.select().from(schema.adminActivityLogs);
-        if (sqlLogs && sqlLogs.length > 0) {
-          db.activityLogs = sqlLogs;
-        }
+          // 7. Load activity logs from Cloud SQL
+          withDbRetry(async () => {
+            const sqlLogs = await pgDb.select().from(schema.adminActivityLogs);
+            if (sqlLogs && sqlLogs.length > 0) {
+              db.activityLogs = sqlLogs;
+            }
+          }),
+
+          // 8. Load notifications from Cloud SQL and merge with file cache
+          withDbRetry(async () => {
+            const sqlNotifs = await pgDb.select().from(schema.appNotifications);
+            if (sqlNotifs && sqlNotifs.length > 0) {
+              const mergedNotifs = [...sqlNotifs];
+              for (const n of (db.notifications || [])) {
+                if (!mergedNotifs.some((m: any) => m.id === n.id)) {
+                  mergedNotifs.push(n);
+                }
+              }
+              db.notifications = mergedNotifs;
+            } else if (!db.notifications) {
+              db.notifications = [];
+            }
+          }),
+        ]);
       } catch (err) {
         console.error('Error fetching persistent data from Cloud SQL, using file cache:', err);
       }
@@ -593,12 +650,14 @@ async function startServer() {
     // Also persist to Cloud SQL if available
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.insert(schema.siteSettingsTable)
-          .values({ id: 1, settings: db.siteSettings })
-          .onConflictDoUpdate({
-            target: schema.siteSettingsTable.id,
-            set: { settings: db.siteSettings, updatedAt: new Date() }
-          });
+        await withDbRetry(() =>
+          pgDb.insert(schema.siteSettingsTable)
+            .values({ id: 1, settings: db.siteSettings })
+            .onConflictDoUpdate({
+              target: schema.siteSettingsTable.id,
+              set: { settings: db.siteSettings, updatedAt: new Date() }
+            })
+        );
       } catch (err) {
         console.error('Error saving site settings to Cloud SQL:', err);
       }
@@ -612,10 +671,12 @@ async function startServer() {
     let settings = null;
     if (process.env.SQL_HOST) {
       try {
-        const [saved] = await pgDb
-          .select()
-          .from(schema.siteSettingsTable)
-          .where(eq(schema.siteSettingsTable.id, 1));
+        const [saved] = await withDbRetry(() =>
+          pgDb
+            .select()
+            .from(schema.siteSettingsTable)
+            .where(eq(schema.siteSettingsTable.id, 1))
+        );
         if (saved?.settings) {
           settings = saved.settings;
         }
@@ -791,7 +852,9 @@ async function startServer() {
 
       if (process.env.SQL_HOST) {
         try {
-          const [saved] = await pgDb.select().from(schema.siteSettingsTable).where(eq(schema.siteSettingsTable.id, 1));
+          const [saved] = await withDbRetry(() =>
+            pgDb.select().from(schema.siteSettingsTable).where(eq(schema.siteSettingsTable.id, 1))
+          );
           if (saved?.settings) {
             const s = saved.settings as any;
             if (s.telegramBotToken) token = s.telegramBotToken.trim();
@@ -871,9 +934,21 @@ async function startServer() {
     db.activityLogs.unshift({
       id: `log-${Date.now()}`,
       timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
-      action: 'تسجيل تلميذ في قاعدة البيانات',
-      details: `انضمام التلميذ ${newStudent.fullName} (${newStudent.stream}) وحفظ بياناته بالسيرفر.`,
+      action: 'تسجيل تلميذ جديد',
+      details: `انضمام التلميذ ${newStudent.fullName} (الهاتف: ${newStudent.phone || '–'} - البريد: ${newStudent.email || '–'}).`,
       category: 'student',
+    });
+
+    // Record notification for administration
+    if (!db.notifications) db.notifications = [];
+    db.notifications.unshift({
+      id: `notif-std-${Date.now()}`,
+      title: 'تسجيل تلميذ جديد 🎓',
+      message: `تم تسجيل تلميذ جديد: ${newStudent.fullName} | الهاتف: ${newStudent.phone || '–'} | البريد: ${newStudent.email || '–'}`,
+      date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+      type: 'general',
+      targetRole: 'admins',
+      read: false,
     });
 
     saveDatabase(db);
@@ -881,28 +956,31 @@ async function startServer() {
     // Save to Cloud SQL
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.insert(schema.students).values({
-          id: newStudent.id,
-          fullName: newStudent.fullName,
-          username: newStudent.username,
-          stream: newStudent.stream,
-          educationLevel: newStudent.educationLevel || (newStudent.stream?.includes('BEM') ? 'BEM' : 'BAC'),
-          phone: newStudent.phone,
-          parentPhone: newStudent.parentPhone,
-          wilaya: newStudent.wilaya,
-          highSchool: newStudent.highSchool,
-          enrolledSubjects: newStudent.enrolledSubjects,
-          attendanceRate: newStudent.attendanceRate || 0,
-          averageScore: newStudent.averageScore || 0,
-          weaknesses: newStudent.weaknesses,
-          strengths: newStudent.strengths,
-          monthlyProgression: newStudent.monthlyProgression,
-          registrationDate: newStudent.registrationDate,
-          notes: newStudent.notes,
-          avatarSeed: newStudent.avatarSeed,
-          avatarUrl: newStudent.avatarUrl,
-          isHidden: false,
-        }).onConflictDoNothing();
+        await withDbRetry(() =>
+          pgDb.insert(schema.students).values({
+            id: newStudent.id,
+            fullName: newStudent.fullName,
+            username: newStudent.username,
+            password: (newStudent as any).password || null,
+            stream: newStudent.stream,
+            educationLevel: newStudent.educationLevel || (newStudent.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+            phone: newStudent.phone,
+            parentPhone: newStudent.parentPhone,
+            wilaya: newStudent.wilaya,
+            highSchool: newStudent.highSchool,
+            enrolledSubjects: newStudent.enrolledSubjects,
+            attendanceRate: newStudent.attendanceRate || 0,
+            averageScore: newStudent.averageScore || 0,
+            weaknesses: newStudent.weaknesses,
+            strengths: newStudent.strengths,
+            monthlyProgression: newStudent.monthlyProgression,
+            registrationDate: newStudent.registrationDate,
+            notes: newStudent.notes,
+            avatarSeed: newStudent.avatarSeed,
+            avatarUrl: newStudent.avatarUrl,
+            isHidden: false,
+          }).onConflictDoNothing()
+        );
       } catch (e) {
         console.error('Cloud SQL student insert error:', e);
       }
@@ -933,7 +1011,7 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.delete(schema.students).where(eq(schema.students.id, studentId));
+        await withDbRetry(() => pgDb.delete(schema.students).where(eq(schema.students.id, studentId)));
       } catch (e) {
         console.error('Cloud SQL delete student error:', e);
       }
@@ -972,7 +1050,7 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.update(schema.students).set({ isHidden }).where(eq(schema.students.id, studentId));
+        await withDbRetry(() => pgDb.update(schema.students).set({ isHidden }).where(eq(schema.students.id, studentId)));
       } catch (e) {
         console.error('Cloud SQL toggle hide student error:', e);
       }
@@ -995,30 +1073,45 @@ async function startServer() {
     db.activityLogs.unshift({
       id: `log-${Date.now()}`,
       timestamp: new Date().toLocaleString('ar-DZ', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
-      action: 'اعتماد أستاذ متطوع جديد',
-      details: `تم تسجيل الأستاذ ${newTeacher.fullName} (مادة ${newTeacher.subject}) في طاقم الجمعية.`,
+      action: 'تسجيل أستاذ جديد',
+      details: `انضم الأستاذ ${newTeacher.fullName} (الهاتف: ${newTeacher.phone || '–'} - البريد: ${newTeacher.email || '–'}).`,
       category: 'teacher',
+    });
+
+    // Record notification for administration
+    if (!db.notifications) db.notifications = [];
+    db.notifications.unshift({
+      id: `notif-tch-${Date.now()}`,
+      title: 'تسجيل أستاذ جديد 👨‍🏫',
+      message: `تم تسجيل أستاذ متطوع جديد: ${newTeacher.fullName} | الهاتف: ${newTeacher.phone || '–'} | البريد: ${newTeacher.email || '–'}`,
+      date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+      type: 'general',
+      targetRole: 'admins',
+      read: false,
     });
 
     saveDatabase(db);
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.insert(schema.teachers).values({
-          id: newTeacher.id,
-          fullName: newTeacher.fullName,
-          username: newTeacher.username,
-          subject: newTeacher.subject,
-          coveredStreams: newTeacher.coveredStreams,
-          phone: newTeacher.phone,
-          email: newTeacher.email,
-          bio: newTeacher.bio,
-          volunteerHours: newTeacher.volunteerHours || 0,
-          centerName: newTeacher.centerName,
-          activeSessionsCount: newTeacher.activeSessionsCount || 0,
-          avatarUrl: newTeacher.avatarUrl,
-          isHidden: false,
-        }).onConflictDoNothing();
+        await withDbRetry(() =>
+          pgDb.insert(schema.teachers).values({
+            id: newTeacher.id,
+            fullName: newTeacher.fullName,
+            username: newTeacher.username,
+            password: (newTeacher as any).password || null,
+            subject: newTeacher.subject,
+            coveredStreams: newTeacher.coveredStreams,
+            phone: newTeacher.phone,
+            email: newTeacher.email,
+            bio: newTeacher.bio,
+            volunteerHours: newTeacher.volunteerHours || 0,
+            centerName: newTeacher.centerName,
+            activeSessionsCount: newTeacher.activeSessionsCount || 0,
+            avatarUrl: newTeacher.avatarUrl,
+            isHidden: false,
+          }).onConflictDoNothing()
+        );
       } catch (e) {
         console.error('Cloud SQL teacher insert error:', e);
       }
@@ -1049,7 +1142,7 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.delete(schema.teachers).where(eq(schema.teachers.id, teacherId));
+        await withDbRetry(() => pgDb.delete(schema.teachers).where(eq(schema.teachers.id, teacherId)));
       } catch (e) {
         console.error('Cloud SQL delete teacher error:', e);
       }
@@ -1088,7 +1181,7 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.update(schema.teachers).set({ isHidden }).where(eq(schema.teachers.id, teacherId));
+        await withDbRetry(() => pgDb.update(schema.teachers).set({ isHidden }).where(eq(schema.teachers.id, teacherId)));
       } catch (e) {
         console.error('Cloud SQL toggle hide teacher error:', e);
       }
@@ -1116,30 +1209,58 @@ async function startServer() {
       category: 'session',
     });
 
+    // Automatically record persistent notification for upcoming session
+    const sessionNotif = {
+      id: `notif-ses-${Date.now().toString().slice(-6)}`,
+      title: `حصة دعم جديدة: ${session.subject}`,
+      message: `🔔 تذكير: حصة ${session.subject} (${session.title}) يوم ${session.timeText} بـ ${session.location}.`,
+      date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+      type: 'session',
+      targetRole: 'students',
+      targetStream: session.stream,
+      read: false,
+    };
+    if (!db.notifications) db.notifications = [];
+    db.notifications.unshift(sessionNotif);
+
     saveDatabase(db);
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.insert(schema.supportSessions).values({
-          id: session.id,
-          title: session.title,
-          subject: session.subject,
-          stream: session.stream,
-          educationLevel: session.educationLevel || (session.stream?.includes('BEM') ? 'BEM' : 'BAC'),
-          teacherId: session.teacherId,
-          teacherName: session.teacherName,
-          date: session.date,
-          timeText: session.timeText,
-          location: session.location,
-          description: session.description,
-          completed: !!session.completed,
-          attendance: session.attendance,
-          pedagogicalNotes: session.pedagogicalNotes,
-          attachedResourceTitle: session.attachedResourceTitle,
-          isHidden: false,
-        }).onConflictDoNothing();
+        await withDbRetry(async () => {
+          await pgDb.insert(schema.supportSessions).values({
+            id: session.id,
+            title: session.title,
+            subject: session.subject,
+            stream: session.stream,
+            educationLevel: session.educationLevel || (session.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+            teacherId: session.teacherId,
+            teacherName: session.teacherName,
+            date: session.date,
+            timeText: session.timeText,
+            location: session.location,
+            description: session.description,
+            completed: !!session.completed,
+            attendance: session.attendance,
+            pedagogicalNotes: session.pedagogicalNotes,
+            attachedResourceTitle: session.attachedResourceTitle,
+            isHidden: false,
+          }).onConflictDoNothing();
+
+          // Also persist notification to Cloud SQL so it is never lost on restart
+          await pgDb.insert(schema.appNotifications).values({
+            id: sessionNotif.id,
+            title: sessionNotif.title,
+            message: sessionNotif.message,
+            date: sessionNotif.date,
+            type: sessionNotif.type,
+            targetRole: sessionNotif.targetRole,
+            targetStream: sessionNotif.targetStream,
+            read: false,
+          }).onConflictDoNothing();
+        });
       } catch (e) {
-        console.error('Cloud SQL session insert error:', e);
+        console.error('Cloud SQL session/notification insert error:', e);
       }
     }
 
@@ -1167,7 +1288,7 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.delete(schema.supportSessions).where(eq(schema.supportSessions.id, sessionId));
+        await withDbRetry(() => pgDb.delete(schema.supportSessions).where(eq(schema.supportSessions.id, sessionId)));
       } catch (e) {
         console.error('Cloud SQL delete session error:', e);
       }
@@ -1197,7 +1318,7 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.update(schema.supportSessions).set({ isHidden }).where(eq(schema.supportSessions.id, sessionId));
+        await withDbRetry(() => pgDb.update(schema.supportSessions).set({ isHidden }).where(eq(schema.supportSessions.id, sessionId)));
       } catch (e) {
         console.error('Cloud SQL toggle hide session error:', e);
       }
@@ -1245,25 +1366,27 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.insert(schema.studyResources).values({
-          id: newRes.id,
-          title: newRes.title,
-          subject: newRes.subject,
-          stream: newRes.stream,
-          educationLevel: newRes.educationLevel || (newRes.stream?.includes('BEM') ? 'BEM' : 'BAC'),
-          type: newRes.type,
-          teacherName: newRes.teacherName,
-          uploadDate: newRes.uploadDate,
-          downloadCount: newRes.downloadCount || 0,
-          fileSize: newRes.fileSize,
-          description: newRes.description,
-          contentPreview: newRes.contentPreview,
-          hasSolution: !!newRes.hasSolution,
-          solutionText: newRes.solutionText,
-          pdfDataUrl: newRes.pdfDataUrl,
-          pdfFileName: newRes.pdfFileName,
-          isHidden: false,
-        }).onConflictDoNothing();
+        await withDbRetry(() =>
+          pgDb.insert(schema.studyResources).values({
+            id: newRes.id,
+            title: newRes.title,
+            subject: newRes.subject,
+            stream: newRes.stream,
+            educationLevel: newRes.educationLevel || (newRes.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+            type: newRes.type,
+            teacherName: newRes.teacherName,
+            uploadDate: newRes.uploadDate,
+            downloadCount: newRes.downloadCount || 0,
+            fileSize: newRes.fileSize,
+            description: newRes.description,
+            contentPreview: newRes.contentPreview,
+            hasSolution: !!newRes.hasSolution,
+            solutionText: newRes.solutionText,
+            pdfDataUrl: newRes.pdfDataUrl,
+            pdfFileName: newRes.pdfFileName,
+            isHidden: false,
+          }).onConflictDoNothing()
+        );
       } catch (e) {
         console.error('Cloud SQL resource insert error:', e);
       }
@@ -1294,7 +1417,7 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.delete(schema.studyResources).where(eq(schema.studyResources.id, resourceId));
+        await withDbRetry(() => pgDb.delete(schema.studyResources).where(eq(schema.studyResources.id, resourceId)));
       } catch (e) {
         console.error('Cloud SQL delete resource error:', e);
       }
@@ -1324,7 +1447,7 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.update(schema.studyResources).set({ isHidden }).where(eq(schema.studyResources.id, resourceId));
+        await withDbRetry(() => pgDb.update(schema.studyResources).set({ isHidden }).where(eq(schema.studyResources.id, resourceId)));
       } catch (e) {
         console.error('Cloud SQL toggle hide resource error:', e);
       }
@@ -1347,26 +1470,146 @@ async function startServer() {
 
     if (process.env.SQL_HOST) {
       try {
-        await pgDb.insert(schema.quizzes).values({
-          id: quiz.id,
-          title: quiz.title,
-          subject: quiz.subject,
-          stream: quiz.stream,
-          educationLevel: quiz.educationLevel || (quiz.stream?.includes('BEM') ? 'BEM' : 'BAC'),
-          durationMinutes: quiz.durationMinutes || 20,
-          totalQuestions: quiz.totalQuestions || quiz.questions?.length || 5,
-          questions: quiz.questions,
-          teacherId: quiz.teacherId,
-          teacherName: quiz.teacherName,
-          createdAt: quiz.createdAt,
-          isCustomTeacherQuiz: !!quiz.isCustomTeacherQuiz,
-        }).onConflictDoNothing();
+        await withDbRetry(() =>
+          pgDb.insert(schema.quizzes).values({
+            id: quiz.id,
+            title: quiz.title,
+            subject: quiz.subject,
+            stream: quiz.stream,
+            educationLevel: quiz.educationLevel || (quiz.stream?.includes('BEM') ? 'BEM' : 'BAC'),
+            durationMinutes: quiz.durationMinutes || 20,
+            totalQuestions: quiz.totalQuestions || quiz.questions?.length || 5,
+            questions: quiz.questions,
+            teacherId: quiz.teacherId,
+            teacherName: quiz.teacherName,
+            createdAt: quiz.createdAt,
+            isCustomTeacherQuiz: !!quiz.isCustomTeacherQuiz,
+          }).onConflictDoNothing()
+        );
       } catch (e) {
         console.error('Cloud SQL quiz insert error:', e);
       }
     }
 
     res.json({ success: true, quiz });
+  });
+
+  // ===================== NOTIFICATIONS MANAGEMENT =====================
+  // POST Add Notification
+  app.post('/api/notifications', async (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const notif = req.body;
+    if (!db.notifications) db.notifications = [];
+    db.notifications.unshift(notif);
+    saveDatabase(db);
+
+    if (process.env.SQL_HOST) {
+      try {
+        await withDbRetry(() =>
+          pgDb.insert(schema.appNotifications).values({
+            id: notif.id,
+            title: notif.title,
+            message: notif.message,
+            date: notif.date,
+            type: notif.type || 'general',
+            targetStream: notif.targetStream,
+            targetRole: notif.targetRole,
+            targetTeacherId: notif.targetTeacherId,
+            read: !!notif.read,
+          }).onConflictDoNothing()
+        );
+      } catch (e) {
+        console.error('Cloud SQL notification insert error:', e);
+      }
+    }
+
+    res.json({ success: true, notification: notif });
+  });
+
+  // PATCH Mark All Notifications Read
+  app.patch('/api/notifications/mark-all-read', (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    db.notifications = (db.notifications || []).map((n: any) => ({ ...n, read: true }));
+    saveDatabase(db);
+    res.json({ success: true });
+  });
+
+  // DELETE Notification
+  app.delete('/api/notifications/:id', (req: Request, res: Response) => {
+    const db = loadDatabase();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+
+    const id = req.params.id;
+    db.notifications = (db.notifications || []).filter((n: any) => n.id !== id);
+    saveDatabase(db);
+    res.json({ success: true });
+  });
+
+  // ===================== WHATSAPP AUTOMATED BROADCAST =====================
+  // POST Broadcast message to WhatsApp Channel / Webhook
+  app.post('/api/whatsapp/broadcast', async (req: Request, res: Response) => {
+    try {
+      const { text, channelUrl } = req.body;
+      if (!text) {
+        return res.status(400).json({ error: 'Message text is required' });
+      }
+
+      const db = loadDatabase();
+      const settings = db?.siteSettings || {};
+      const webhookUrl = settings.whatsappWebhookUrl || process.env.WHATSAPP_WEBHOOK_URL;
+      const apiKey = settings.whatsappApiKey || process.env.WHATSAPP_API_KEY;
+
+      // 1. If custom Webhook or API is configured, forward the automated message
+      if (webhookUrl) {
+        try {
+          await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}),
+            },
+            body: JSON.stringify({
+              text,
+              channelUrl: channelUrl || settings.whatsappChannelUrl,
+              chatId: settings.whatsappPhoneOrGroup,
+            }),
+          });
+        } catch (webhookErr) {
+          console.warn('WhatsApp webhook call failed, falling back to share link:', webhookErr);
+        }
+      }
+
+      // 2. Record activity log
+      const logItem = {
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+        action: 'بث إشعار لقناة الواتساب',
+        details: `تم بث الإشعار: "${text.slice(0, 45)}..." إلى قناة/مجموعة الواتساب بنجاح.`,
+        category: 'settings' as const,
+      };
+      if (db) {
+        if (!db.activityLogs) db.activityLogs = [];
+        db.activityLogs.unshift(logItem);
+        saveDatabase(db);
+      }
+
+      const encodedText = encodeURIComponent(text);
+      const shareLink = `https://api.whatsapp.com/send?text=${encodedText}`;
+
+      res.json({
+        success: true,
+        text,
+        shareLink,
+        channelUrl: channelUrl || settings.whatsappChannelUrl || 'https://whatsapp.com',
+      });
+    } catch (err: any) {
+      console.error('WhatsApp broadcast error:', err);
+      res.status(500).json({ error: 'خطأ في معالجة إشعار الواتساب' });
+    }
   });
 
   // Mount Vite middleware in development

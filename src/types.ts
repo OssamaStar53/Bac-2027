@@ -64,6 +64,7 @@ export interface AppUser {
   role: UserRole;
   username: string;
   phone: string;
+  email?: string;
   password: string;
   fullName: string;
   relatedId: string; // matches studentId or teacherId
@@ -113,6 +114,15 @@ export interface SiteSettings {
   autoNotifyNewStudent: boolean;
   autoNotifyNewSession: boolean;
   autoNotifyNewResource: boolean;
+  // WhatsApp Channel & Automated Notifications Integration
+  whatsappBotEnabled?: boolean;
+  whatsappChannelUrl?: string;
+  whatsappWebhookUrl?: string;
+  whatsappApiKey?: string;
+  whatsappPhoneOrGroup?: string;
+  autoNotifyWhatsAppNewStudent?: boolean;
+  autoNotifyWhatsAppNewSession?: boolean;
+  autoNotifyWhatsAppNewResource?: boolean;
   // Social links
   facebookUrl: string;
   telegramChannelUrl: string;
@@ -134,6 +144,7 @@ export interface Student {
   id: string;
   fullName: string;
   username?: string;
+  email?: string;
   password?: string;
   stream: BacStream;
   educationLevel?: EducationLevel;

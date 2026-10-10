@@ -27,43 +27,56 @@ interface AssociationDashboardProps {
 }
 
 export const AssociationDashboard: React.FC<AssociationDashboardProps> = ({
-  students,
-  teachers,
-  sessions,
-  quizSubmissions,
+  students = [],
+  teachers = [],
+  sessions = [],
+  quizSubmissions = [],
   currentUser,
   onOpenAuth,
 }) => {
   const [streamFilter, setStreamFilter] = useState<string>('all');
   const [exported, setExported] = useState(false);
 
-  const filteredStudents = streamFilter === 'all' 
-    ? students 
-    : students.filter(s => s.stream === streamFilter);
+  const safeStudents = students || [];
+  const safeTeachers = teachers || [];
+  const safeSessions = sessions || [];
 
-  // Key KPI metrics
-  const totalStudents = students.length;
-  const bacStudentsCount = students.filter(s => !s.stream.includes('BEM') && s.educationLevel !== 'BEM').length;
-  const bemStudentsCount = students.filter(s => s.stream.includes('BEM') || s.educationLevel === 'BEM').length;
-  const totalTeachers = teachers.length;
-  const totalSessions = sessions.length;
-  const completedSessions = sessions.filter(s => s.completed).length;
+  const filteredStudents = streamFilter === 'all' 
+    ? safeStudents 
+    : safeStudents.filter(s => (s.stream || '') === streamFilter);
+
+  // Key KPI metrics with safe fallbacks
+  const totalStudents = safeStudents.length;
+  const bacStudentsCount = safeStudents.filter(s => {
+    const str = s.stream || '';
+    return !str.includes('BEM') && s.educationLevel !== 'BEM';
+  }).length;
+  const bemStudentsCount = safeStudents.filter(s => {
+    const str = s.stream || '';
+    return str.includes('BEM') || s.educationLevel === 'BEM';
+  }).length;
+  const totalTeachers = safeTeachers.length;
+  const totalSessions = safeSessions.length;
+  const completedSessions = safeSessions.filter(s => !!s.completed).length;
 
   // Average attendance rate
   const avgAttendance = (
-    students.reduce((acc, s) => acc + s.attendanceRate, 0) / (students.length || 1)
+    safeStudents.reduce((acc, s) => acc + (typeof s.attendanceRate === 'number' ? s.attendanceRate : 0), 0) / (safeStudents.length || 1)
   ).toFixed(1);
 
   // Average test score across all students
   const avgTestScore = (
-    students.reduce((acc, s) => acc + s.averageScore, 0) / (students.length || 1)
+    safeStudents.reduce((acc, s) => acc + (typeof s.averageScore === 'number' ? s.averageScore : 0), 0) / (safeStudents.length || 1)
   ).toFixed(1);
 
   // Calculate subjects that need the most support
   const subjectNeedCount: Record<string, number> = {};
-  students.forEach((s) => {
-    s.weaknesses.forEach((sub) => {
-      subjectNeedCount[sub] = (subjectNeedCount[sub] || 0) + 1;
+  safeStudents.forEach((s) => {
+    const wList = s.weaknesses || [];
+    wList.forEach((sub) => {
+      if (sub) {
+        subjectNeedCount[sub] = (subjectNeedCount[sub] || 0) + 1;
+      }
     });
   });
 
@@ -72,8 +85,9 @@ export const AssociationDashboard: React.FC<AssociationDashboardProps> = ({
 
   // Aggregate stream distribution
   const streamCounts: Record<string, number> = {};
-  students.forEach((s) => {
-    streamCounts[s.stream] = (streamCounts[s.stream] || 0) + 1;
+  safeStudents.forEach((s) => {
+    const str = s.stream || 'غير محدد';
+    streamCounts[str] = (streamCounts[str] || 0) + 1;
   });
 
   const handleExportReport = () => {
@@ -341,7 +355,7 @@ export const AssociationDashboard: React.FC<AssociationDashboardProps> = ({
           <div className="mt-5 pt-4 border-t border-stone-100 flex items-center justify-between text-xs">
             <span className="text-stone-500">إجمالي الساعات التطوعية المقدمة:</span>
             <span className="font-mono font-bold text-emerald-800 text-sm">
-              {teachers.reduce((acc, t) => acc + t.volunteerHours, 0)} ساعة تطوع
+              {safeTeachers.reduce((acc, t) => acc + (typeof t.volunteerHours === 'number' ? t.volunteerHours : 0), 0)} ساعة تطوع
             </span>
           </div>
         </div>
@@ -373,23 +387,25 @@ export const AssociationDashboard: React.FC<AssociationDashboardProps> = ({
               {filteredStudents.map((s) => (
                 <tr key={s.id} className="hover:bg-stone-50 transition-colors">
                   <td className="py-3 px-4 font-bold text-stone-900">
-                    {s.fullName}
-                    <span className="block text-[10px] text-stone-400 font-mono">{s.highSchool}</span>
+                    {s.fullName || 'تلميذ مسجل'}
+                    <span className="block text-[10px] text-stone-400 font-mono">{s.highSchool || '–'}</span>
                   </td>
-                  <td className="py-3 px-4 text-stone-700">{s.stream}</td>
+                  <td className="py-3 px-4 text-stone-700">{s.stream || '–'}</td>
                   <td className="py-3 px-4 font-mono font-bold text-emerald-700">
-                    {s.attendanceRate}%
+                    {typeof s.attendanceRate === 'number' ? s.attendanceRate : 0}%
                   </td>
                   <td className="py-3 px-4 font-mono font-bold text-stone-900">
-                    {s.averageScore} / 20
+                    {typeof s.averageScore === 'number' ? s.averageScore : 0} / 20
                   </td>
                   <td className="py-3 px-4">
                     <span className="text-rose-700 font-semibold">
-                      {s.weaknesses.join(' – ')}
+                      {s.weaknesses && s.weaknesses.length > 0 ? s.weaknesses.join(' – ') : 'لا توجد نقائص مسجلة'}
                     </span>
                   </td>
                   <td className="py-3 px-4 font-mono text-emerald-700 font-bold">
-                    +{(s.monthlyProgression[s.monthlyProgression.length - 1]?.score - s.monthlyProgression[0]?.score).toFixed(1)} ن
+                    {s.monthlyProgression && s.monthlyProgression.length > 1
+                      ? `+${((s.monthlyProgression[s.monthlyProgression.length - 1]?.score || 0) - (s.monthlyProgression[0]?.score || 0)).toFixed(1)} ن`
+                      : '–'}
                   </td>
                 </tr>
               ))}

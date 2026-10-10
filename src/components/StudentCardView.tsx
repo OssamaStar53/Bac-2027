@@ -83,21 +83,13 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
             </div>
           </div>
 
-          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <div className="pt-2 flex items-center justify-center w-full">
             <button
               onClick={onOpenAuth}
-              className="w-full sm:w-auto px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-xs"
+              className="w-full sm:w-auto px-6 py-3 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-xs"
             >
               <LogIn className="w-4 h-4 text-amber-300" />
-              <span>تسجيل الدخول (تلميذ / أستاذ / إدارة)</span>
-            </button>
-
-            <button
-              onClick={onOpenRegister}
-              className="w-full sm:w-auto px-6 py-2.5 bg-white border border-stone-300 hover:bg-stone-50 text-stone-800 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-2"
-            >
-              <UserPlus className="w-4 h-4 text-emerald-700" />
-              <span>تسجيل تلميذ جديد</span>
+              <span>تسجيل الدخول لعرض بطاقتك الرقمية</span>
             </button>
           </div>
         </div>
@@ -105,18 +97,19 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
     );
   }
 
-  // 2. Identify the active student based on role
+  // 2. Identify the active student based on role with safe fallbacks
+  const safeStudents = students || [];
   let currentStudent: Student | undefined;
 
   if (currentUser.role === 'student') {
     // A student can ONLY see their own card! Never other students' cards.
-    currentStudent = students.find((s) => s.id === currentUser.relatedId) ||
-                     students.find((s) => s.username === currentUser.username) ||
-                     students.find((s) => s.fullName === currentUser.fullName) ||
-                     students[0];
+    currentStudent = safeStudents.find((s) => s.id === currentUser.relatedId) ||
+                     safeStudents.find((s) => s.username === currentUser.username) ||
+                     safeStudents.find((s) => s.fullName === currentUser.fullName) ||
+                     safeStudents[0];
   } else {
     // Teachers and association admins can choose any student
-    currentStudent = students.find((s) => s.id === selectedStudentId) || students[0];
+    currentStudent = safeStudents.find((s) => s.id === selectedStudentId) || safeStudents[0];
   }
 
   const isTeacherOrAdmin = currentUser.role === 'teacher' || currentUser.role === 'association_admin';
@@ -125,11 +118,11 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
   if (!currentStudent) {
     return (
       <div className="max-w-4xl mx-auto py-12 px-4 text-center">
-        <p className="text-stone-500">لا يوجد تلاميذ مسجلين حالياً.</p>
+        <p className="text-stone-500 font-medium">لا يوجد تلاميذ مسجلين حالياً بالمنصة.</p>
         {isTeacherOrAdmin && (
           <button
             onClick={onOpenRegister}
-            className="mt-4 px-4 py-2 bg-emerald-700 text-white rounded-lg text-sm font-semibold"
+            className="mt-4 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
           >
             تسجيل أول تلميذ
           </button>
@@ -138,7 +131,8 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
     );
   }
 
-  const isBem = currentStudent.educationLevel === 'BEM' || currentStudent.stream.includes('BEM');
+  const studentStream = currentStudent.stream || 'علوم تجريبية';
+  const isBem = currentStudent.educationLevel === 'BEM' || studentStream.includes('BEM');
 
   const handlePrint = () => {
     window.print();
@@ -153,39 +147,49 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
     setPdfDownloading(false);
   };
 
+  const safeWeaknesses = currentStudent.weaknesses || [];
+  const safeStrengths = currentStudent.strengths || [];
+  const safeProgression = currentStudent.monthlyProgression || [];
+  const safeEnrolledSubjects = currentStudent.enrolledSubjects && currentStudent.enrolledSubjects.length > 0 
+    ? currentStudent.enrolledSubjects 
+    : ['الرياضيات', 'العلوم الفيزيائية'];
+  const safeAttendanceRate = typeof currentStudent.attendanceRate === 'number' ? currentStudent.attendanceRate : 100;
+  const safeAverageScore = typeof currentStudent.averageScore === 'number' ? currentStudent.averageScore : 12.0;
+
   const handleWhatsAppShare = () => {
     if (!currentStudent) return;
     const certText = isBem ? 'شهادة التعليم المتوسط BEM 2027' : 'شهادة البكالوريا 2027';
     const text = encodeURIComponent(
       `🎓 *بطاقة تلميذ رقمية - بذرة غد (${certText})*\n\n` +
-      `👤 *التلميذ:* ${currentStudent.fullName}\n` +
-      `📚 *المستوى/الشعبة:* ${currentStudent.stream}\n` +
-      `🏫 *المؤسسة:* ${currentStudent.highSchool}\n` +
-      `📅 *الحضور:* ${currentStudent.attendanceRate}%\n` +
-      `📝 *معدل الاختبارات:* ${currentStudent.averageScore}/20\n` +
-      `⚠️ *نقاط تحتاج إلى تحسين:* ${currentStudent.weaknesses.join(' – ') || 'لا توجد'}\n` +
+      `👤 *التلميذ:* ${currentStudent.fullName || '–'}\n` +
+      `📚 *المستوى/الشعبة:* ${studentStream}\n` +
+      `🏫 *المؤسسة:* ${currentStudent.highSchool || '–'}\n` +
+      `📅 *الحضور:* ${safeAttendanceRate}%\n` +
+      `📝 *معدل الاختبارات:* ${safeAverageScore}/20\n` +
+      `⚠️ *نقاط تحتاج إلى تحسين:* ${safeWeaknesses.length > 0 ? safeWeaknesses.join(' – ') : 'لا توجد نقائص مسجلة'}\n` +
       `📍 *الجهة المؤطرة:* جمعية «بذرة غد» الشبانية — ولاية إن صالح\n\n` +
       `جمعية بذرة غد الشبانية – شباب اليوم ... قادة الغد.`
     );
     window.open(`https://wa.me/?text=${text}`, '_blank');
   };
 
-  // Filter students for Teacher / Admin selection
-  const filteredStudentsForAdmin = students.filter((s) => {
-    const sIsBem = s.educationLevel === 'BEM' || s.stream.includes('BEM');
+  // Filter students for Teacher / Admin selection safely
+  const filteredStudentsForAdmin = safeStudents.filter((s) => {
+    const sStream = s.stream || '';
+    const sIsBem = s.educationLevel === 'BEM' || sStream.includes('BEM');
     if (levelFilter === 'BAC' && sIsBem) return false;
     if (levelFilter === 'BEM' && !sIsBem) return false;
     if (searchStudentQuery.trim()) {
       const q = searchStudentQuery.toLowerCase().trim();
-      const matchName = s.fullName.toLowerCase().includes(q);
-      const matchStream = s.stream.toLowerCase().includes(q);
+      const matchName = (s.fullName || '').toLowerCase().includes(q);
+      const matchStream = sStream.toLowerCase().includes(q);
       return matchName || matchStream;
     }
     return true;
   });
 
-  const scores = currentStudent.monthlyProgression.map(p => p.score);
-  const maxScore = Math.max(...scores, 20);
+  const scores = safeProgression.map(p => typeof p.score === 'number' ? p.score : 10);
+  const maxScore = Math.max(...(scores.length > 0 ? scores : [20]), 20);
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -244,9 +248,9 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
 
         {/* ONLY Teachers and Admins have student selector and search (COMPLETELY HIDDEN FOR STUDENTS) */}
         {isTeacherOrAdmin && (
-          <div className="mt-4 pt-3 border-t border-stone-100 flex flex-wrap items-center justify-between gap-3 bg-stone-50/80 p-3 rounded-2xl border">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-bold text-stone-700">تصفية حسب الطور:</span>
+          <div className="mt-4 pt-3 border-t border-stone-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-stone-50/80 p-3 rounded-2xl border">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs">
+              <span className="font-bold text-stone-700">الطور:</span>
               <button
                 onClick={() => setLevelFilter('all')}
                 className={`px-2.5 py-1 rounded-lg font-bold text-xs cursor-pointer transition-colors ${
@@ -273,7 +277,7 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
               </button>
             </div>
 
-            <div className="flex items-center gap-2 flex-1 max-w-md">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 w-full sm:max-w-md">
               <div className="relative flex-1">
                 <input
                   type="text"
@@ -288,7 +292,7 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
               <select
                 value={currentStudent.id}
                 onChange={(e) => onSelectStudent(e.target.value)}
-                className="px-3 py-1.5 bg-white border border-stone-300 rounded-lg text-xs font-bold text-stone-800 focus:outline-hidden focus:border-emerald-600 max-w-[200px] truncate"
+                className="px-3 py-1.5 bg-white border border-stone-300 rounded-lg text-xs font-bold text-stone-800 focus:outline-hidden focus:border-emerald-600 max-w-full sm:max-w-[200px] truncate"
               >
                 {filteredStudentsForAdmin.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -308,28 +312,28 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
         <div className="lg:col-span-7 bg-white rounded-2xl border border-stone-200 shadow-md overflow-hidden relative">
           
           {/* Card Top Banner with Emblem */}
-          <div className="bg-emerald-900 text-white p-5 relative overflow-hidden">
+          <div className="bg-emerald-900 text-white p-4 sm:p-5 relative overflow-hidden">
             <div className="absolute -left-6 -bottom-6 w-32 h-32 bg-emerald-800/50 rounded-full blur-xl pointer-events-none" />
             
-            <div className="flex items-center justify-between relative z-10">
-              <div className="flex items-center gap-3">
-                <div className="w-13 h-13 rounded-2xl bg-white border border-emerald-300/40 p-1 flex items-center justify-center shrink-0 shadow-xs">
-                  <BadhraLogo size={42} />
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-2xl bg-white border border-emerald-300/40 p-1 flex items-center justify-center shrink-0 shadow-xs">
+                  <BadhraLogo size={36} />
                 </div>
-                <div>
-                  <div className="text-[11px] font-semibold text-emerald-300 tracking-wide">
+                <div className="min-w-0">
+                  <div className="text-[10px] sm:text-[11px] font-semibold text-emerald-300 tracking-wide truncate">
                     الجمهورية الجزائرية الديمقراطية الشعبية
                   </div>
-                  <h2 className="text-base font-bold text-white tracking-tight">
+                  <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
                     جمعية «بذرة غد» الشبانية – إن صالح
                   </h2>
-                  <div className="text-[10px] text-amber-300 font-bold">
+                  <div className="text-[9px] sm:text-[10px] text-amber-300 font-bold">
                     شباب اليوم ... قادة الغد
                   </div>
                 </div>
               </div>
 
-              <div className="text-left font-mono text-[10px] text-emerald-200">
+              <div className="text-left font-mono text-[10px] text-emerald-200 shrink-0">
                 <div className="font-extrabold text-amber-300 text-xs">
                   {isBem ? 'BEM 2027' : 'BAC 2027'}
                 </div>
@@ -338,61 +342,61 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
             </div>
 
             <div className="mt-3 pt-2 border-t border-emerald-800/80 flex items-center justify-between text-xs text-emerald-100">
-              <span className="font-bold flex items-center gap-1.5">
+              <span className="font-bold flex items-center gap-1.5 truncate">
                 {isBem ? (
                   <>
-                    <BookOpen className="w-3.5 h-3.5 text-amber-300" />
-                    <span>بطاقة المرافقة والتفوق في شهادة التعليم المتوسط (BEM)</span>
+                    <BookOpen className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                    <span className="truncate">بطاقة التفوق في شهادة التعليم المتوسط (BEM)</span>
                   </>
                 ) : (
                   <>
-                    <GraduationCap className="w-3.5 h-3.5 text-amber-300" />
-                    <span>بطاقة المرافقة والتفوق في شهادة البكالوريا (BAC)</span>
+                    <GraduationCap className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                    <span className="truncate">بطاقة التفوق في شهادة البكالوريا (BAC)</span>
                   </>
                 )}
               </span>
-              <span className="font-mono text-[11px] bg-emerald-800 px-2 py-0.5 rounded-sm">
+              <span className="font-mono text-[10px] sm:text-[11px] bg-emerald-800 px-2 py-0.5 rounded-sm shrink-0">
                 الموسم 2026/2027
               </span>
             </div>
           </div>
 
           {/* Student Core Attributes Layout */}
-          <div className="p-6 space-y-5">
+          <div className="p-4 sm:p-6 space-y-4 sm:space-y-5">
             
             {/* Student Name, Photo & Stream */}
-            <div className="flex items-start justify-between gap-4 pb-4 border-b border-stone-100">
-              <div className="flex items-center gap-3.5">
+            <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4 pb-4 border-b border-stone-100">
+              <div className="flex items-center gap-3">
                 {currentStudent.avatarUrl ? (
                   <img
                     src={currentStudent.avatarUrl}
-                    alt={currentStudent.fullName}
-                    className="w-16 h-16 rounded-2xl object-cover border-2 border-emerald-600 shadow-xs shrink-0"
+                    alt={currentStudent.fullName || 'صورة التلميذ'}
+                    className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover border-2 border-emerald-600 shadow-xs shrink-0"
                   />
                 ) : (
-                  <div className="w-16 h-16 rounded-2xl bg-emerald-800 text-white flex items-center justify-center font-black text-xl shadow-xs shrink-0">
-                    {currentStudent.fullName.slice(0, 2)}
+                  <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-emerald-800 text-white flex items-center justify-center font-black text-lg sm:text-xl shadow-xs shrink-0">
+                    {(currentStudent.fullName || 'تلميذ').slice(0, 2)}
                   </div>
                 )}
-                <div>
+                <div className="min-w-0">
                   <span className="text-[11px] font-medium text-stone-500 block">التلميذ (ة):</span>
-                  <h3 className="text-xl font-black text-stone-900 tracking-tight mt-0.5">
-                    {currentStudent.fullName}
+                  <h3 className="text-lg sm:text-xl font-black text-stone-900 tracking-tight mt-0.5 truncate">
+                    {currentStudent.fullName || 'تلميذ مسجل'}
                   </h3>
-                  <div className="text-xs text-stone-600 mt-1 flex items-center gap-2">
-                    <span>{currentStudent.highSchool}</span>
+                  <div className="text-xs text-stone-600 mt-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <span>{currentStudent.highSchool || 'المؤسسة التعليمية'}</span>
                     <span aria-hidden="true">·</span>
-                    <span>{currentStudent.wilaya}</span>
+                    <span>{currentStudent.wilaya || 'إن صالح'}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="text-left shrink-0">
+              <div className="w-full sm:w-auto flex sm:block items-center justify-between bg-stone-50 sm:bg-transparent p-2 sm:p-0 rounded-xl">
                 <span className="text-[11px] font-medium text-stone-500 block">
-                  {isBem ? 'المستوى الدراسي:' : 'الشعبة:'}
+                  {isBem ? 'المستوى:' : 'الشعبة:'}
                 </span>
-                <span className="inline-block mt-0.5 px-3 py-1 bg-stone-100 text-stone-800 font-bold rounded-lg text-xs">
-                  {currentStudent.stream}
+                <span className="inline-block mt-0.5 px-3 py-1 bg-stone-200/80 sm:bg-stone-100 text-stone-800 font-bold rounded-lg text-xs">
+                  {studentStream}
                 </span>
               </div>
             </div>
@@ -403,7 +407,7 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
                 المواد المسجلة في حصص الدعم:
               </span>
               <div className="flex flex-wrap gap-1.5">
-                {currentStudent.enrolledSubjects.map((subject, idx) => (
+                {safeEnrolledSubjects.map((subject, idx) => (
                   <span
                     key={idx}
                     className="px-2.5 py-1 bg-stone-50 border border-stone-200 text-stone-700 text-xs font-medium rounded-md"
@@ -422,19 +426,19 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
                 <div className="flex items-center justify-between text-xs text-stone-600 mb-1">
                   <span className="font-semibold">نسبة الحضور:</span>
                   <span className="font-mono font-bold text-emerald-700 text-sm">
-                    {currentStudent.attendanceRate}%
+                    {safeAttendanceRate}%
                   </span>
                 </div>
                 <div className="w-full bg-stone-200 h-2 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full ${
-                      currentStudent.attendanceRate >= 80 ? 'bg-emerald-600' : 'bg-amber-500'
+                      safeAttendanceRate >= 80 ? 'bg-emerald-600' : 'bg-amber-500'
                     }`}
-                    style={{ width: `${currentStudent.attendanceRate}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, safeAttendanceRate))}%` }}
                   />
                 </div>
                 <span className="text-[10px] text-stone-500 mt-1 block">
-                  {currentStudent.attendanceRate >= 80 ? '● مواظب ومنضبط' : '▲ يحتاج تحسين الحضور'}
+                  {safeAttendanceRate >= 80 ? '● مواظب ومنضبط' : '▲ يحتاج تحسين الحضور'}
                 </span>
               </div>
 
@@ -443,17 +447,17 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
                 <div className="flex items-center justify-between text-xs text-stone-600 mb-1">
                   <span className="font-semibold">معدل الاختبارات:</span>
                   <span className="font-mono font-bold text-stone-900 text-sm">
-                    {currentStudent.averageScore} / 20
+                    {safeAverageScore} / 20
                   </span>
                 </div>
                 <div className="w-full bg-stone-200 h-2 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-stone-800 rounded-full"
-                    style={{ width: `${(currentStudent.averageScore / 20) * 100}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, (safeAverageScore / 20) * 100))}%` }}
                   />
                 </div>
                 <span className="text-[10px] text-stone-500 mt-1 block">
-                  {currentStudent.averageScore >= 14 ? '★ مستوى ممتاز' : currentStudent.averageScore >= 10 ? '● مستوى مقبول' : '▲ بحاجة إلى دعم مكثف'}
+                  {safeAverageScore >= 14 ? '★ مستوى ممتاز' : safeAverageScore >= 10 ? '● مستوى مقبول' : '▲ بحاجة إلى دعم مكثف'}
                 </span>
               </div>
 
@@ -466,8 +470,8 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
                 <span>نقاط تتطلب تركيزاً بيداغوجياً (ملاحظات الأساتذة المؤطرين):</span>
               </div>
               <div className="flex flex-wrap gap-2 pt-1">
-                {currentStudent.weaknesses.length > 0 ? (
-                  currentStudent.weaknesses.map((w, idx) => (
+                {safeWeaknesses.length > 0 ? (
+                  safeWeaknesses.map((w, idx) => (
                     <span
                       key={idx}
                       className="px-2.5 py-1 bg-white border border-amber-300 text-amber-900 rounded-md font-semibold text-xs shadow-2xs"
@@ -518,47 +522,53 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
                 <span>التطور الشهري للنتائج والحضور</span>
               </h3>
               <span className="text-[10px] text-stone-500 font-mono">
-                {currentStudent.monthlyProgression.length} أشهر مسجلة
+                {safeProgression.length} أشهر مسجلة
               </span>
             </div>
 
             <div className="space-y-4">
-              {currentStudent.monthlyProgression.map((item, idx) => {
-                const scorePercent = (item.score / maxScore) * 100;
-                return (
-                  <div key={idx} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-stone-700">{item.month}</span>
-                      <div className="flex items-center gap-3 font-mono text-[11px]">
-                        <span className="text-emerald-700 font-bold">حضور: {item.attendance}%</span>
-                        <span className="text-stone-900 font-bold">معدل: {item.score}/20</span>
+              {safeProgression.length === 0 ? (
+                <div className="py-4 text-center text-stone-400 text-xs">
+                  سيتم تسجيل أول مؤشر شهري فور إجراء الاختبار الأول أو رصد الحضور.
+                </div>
+              ) : (
+                safeProgression.map((item, idx) => {
+                  const scorePercent = (item.score / maxScore) * 100;
+                  return (
+                    <div key={idx} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-stone-700">{item.month}</span>
+                        <div className="flex items-center gap-3 font-mono text-[11px]">
+                          <span className="text-emerald-700 font-bold">حضور: {item.attendance}%</span>
+                          <span className="text-stone-900 font-bold">معدل: {item.score}/20</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        {/* Attendance Bar */}
+                        <div className="w-full bg-stone-100 h-2 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-600 rounded-full"
+                            style={{ width: `${item.attendance}%` }}
+                          />
+                        </div>
+                        {/* Score Bar */}
+                        <div className="w-full bg-stone-100 h-2 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-stone-800 rounded-full"
+                            style={{ width: `${scorePercent}%` }}
+                          />
+                        </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      {/* Attendance Bar */}
-                      <div className="w-full bg-stone-100 h-2 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-emerald-600 rounded-full"
-                          style={{ width: `${item.attendance}%` }}
-                        />
-                      </div>
-                      {/* Score Bar */}
-                      <div className="w-full bg-stone-100 h-2 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-stone-800 rounded-full"
-                          style={{ width: `${scorePercent}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
 
             <div className="mt-5 p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs text-stone-600 flex items-center justify-between">
               <span>معدل التحسن الإجمالي:</span>
               <span className="font-bold text-emerald-700 font-mono">
-                +{(scores[scores.length - 1] - scores[0]).toFixed(1)} نقطة
+                {scores.length > 1 ? `+${(scores[scores.length - 1] - scores[0]).toFixed(1)} نقطة` : 'قيد الرصد الدوري'}
               </span>
             </div>
           </div>
@@ -583,18 +593,6 @@ export const StudentCardView: React.FC<StudentCardViewProps> = ({
               <span>تاريخ التسجيل:</span>
               <span className="font-mono text-stone-700">{currentStudent.registrationDate}</span>
             </div>
-
-            {/* Action for Teacher / Admin to Register New Student */}
-            {isTeacherOrAdmin && (
-              <div className="pt-2 flex items-center justify-between">
-                <button
-                  onClick={onOpenRegister}
-                  className="w-full py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold rounded-lg transition-colors cursor-pointer text-center"
-                >
-                  + تسجيل تلميذ جديد
-                </button>
-              </div>
-            )}
 
             {isStudentRole && (
               <div className="pt-2 text-center text-[11px] text-emerald-800 bg-emerald-50 py-2 rounded-lg font-bold">

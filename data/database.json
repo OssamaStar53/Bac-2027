@@ -27,6 +27,11 @@
     "autoNotifyNewResource": true,
     "facebookUrl": "https://facebook.com/badhrat.ghad",
     "telegramChannelUrl": "https://t.me/badhrat_ghad_bac2027",
+    "whatsappBotEnabled": true,
+    "whatsappChannelUrl": "https://whatsapp.com/channel/0029VbBadhratGhad2027",
+    "autoNotifyWhatsAppNewStudent": true,
+    "autoNotifyWhatsAppNewSession": true,
+    "whatsappPhoneOrGroup": "0661234567",
     "whatsappContact": "0661234567",
     "youtubeUrl": "https://youtube.com",
     "instagramUrl": "https://instagram.com",
@@ -48,6 +53,87 @@
   "students": [],
   "teachers": [],
   "sessions": [],
+  "notifications": [
+    {
+      "id": "notif-01",
+      "title": "تذكير بموعد حصة الرياضيات",
+      "message": "🔔 تذكير: حصة الرياضيات (دراسة الدوال الأسية) يوم الخميس بعد صلاة المغرب بدار الشباب الشهيد بوجمعة مع الأستاذ بن عيسى.",
+      "date": "2026-10-06 09:30",
+      "type": "session",
+      "targetRole": "students",
+      "targetStream": "علوم تجريبية",
+      "read": true
+    },
+    {
+      "id": "notif-04",
+      "title": "تذكير حصة الفيزياء",
+      "message": "🔔 تذكير: حصة الفيزياء يوم الخميس بعد صلاة المغرب بدار الشباب.",
+      "date": "2026-10-04 11:00",
+      "type": "reminder",
+      "targetRole": "all",
+      "targetStream": "الكل",
+      "read": true
+    },
+    {
+      "id": "notif-03",
+      "title": "رفع ملخص جديد في العلوم الفيزيائية",
+      "message": "📚 قامت الأستاذة مريم قدور برفع سلسلة تمارين محلولة في الوحدة الأولى (المتابعة الزمنية والناقلية).",
+      "date": "2026-10-04 18:20",
+      "type": "general",
+      "targetRole": "all",
+      "targetStream": "علوم تجريبية",
+      "read": true
+    },
+    {
+      "id": "notif-t-02",
+      "title": "دعوة لاجتماع تنسيقي للأساتذة المتطوعين",
+      "message": "📢 تدعو إدارة جمعية بذرة غد كافة الأساتذة المتطوعين لحضور جلسة التنسيق البيداغوجي لتقييم نتائج الاختبارات التجريبية يوم السبت بدار الشباب.",
+      "date": "2026-10-05 16:00",
+      "type": "teacher_alert",
+      "targetRole": "teachers",
+      "read": true
+    },
+    {
+      "id": "notif-6302",
+      "title": "حصة دعم جديدة: الرياضيات",
+      "message": "🔔 تذكير: حصة الرياضيات (Test Iq By ishak mohamed) يوم الخميس 17:30 (بعد صلاة المغرب) بـ دار الشباب الشهيد بوجمعة - القاعة الكبرى.",
+      "date": "08:43 ص",
+      "type": "session",
+      "targetRole": "students",
+      "targetStream": "علوم تجريبية",
+      "read": true
+    },
+    {
+      "id": "notif-02",
+      "title": "إعلان اختبار تجريبي إلكتروني",
+      "message": "📝 تم فتح الاختبار التجريبي الشامل في مادة الرياضيات (20 سؤالاً، 60 دقيقة) مع التصحيح الآلي الفوري.",
+      "date": "2026-10-05 14:00",
+      "type": "exam",
+      "targetRole": "all",
+      "targetStream": "الكل",
+      "read": true
+    },
+    {
+      "id": "notif-t-01",
+      "title": "تنبيه أستاذ: تأكيد حجز قاعة الحصة",
+      "message": "🔔 تنبيه خاص بالأساتذة: تم تأكيد حجز القاعة الكبرى بدار الشباب لحصة الأستاذ بلقاسم بن عيسى يوم الخميس بعد صلاة المغرب.",
+      "date": "2026-10-06 10:15",
+      "type": "teacher_alert",
+      "targetRole": "teachers",
+      "targetTeacherId": "tch-001",
+      "read": true
+    },
+    {
+      "id": "notif-t-8201",
+      "title": "تذكير بموعد الحصة بدار الشباب",
+      "message": "🔔 تنبيه للأستاذ: يرجى تأكيد الحضور لحصة الدعم المقررة بعد صلاة المغرب بدار الشباب.",
+      "date": "09:32 ص",
+      "type": "teacher_alert",
+      "targetRole": "teachers",
+      "targetTeacherId": "tch-001",
+      "read": true
+    }
+  ],
   "activityLogs": [
     {
       "id": "log-1",

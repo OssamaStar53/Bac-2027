@@ -38,12 +38,14 @@ import { AssociationDashboard } from './components/AssociationDashboard';
 import { AssociationControlPanel } from './components/AssociationControlPanel';
 import { CommunicationCenter } from './components/CommunicationCenter';
 import { StudentRegistrationModal } from './components/StudentRegistrationModal';
+import { TeacherRegistrationModal } from './components/TeacherRegistrationModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { AuthModal } from './components/AuthModal';
 import { ProfileSettingsModal } from './components/ProfileSettingsModal';
 import { BadhraLogo } from './components/BadhraLogo';
 import { api } from './api';
-import { PhoneCall, MapPin, Mail, CheckCircle2, MessageSquare, ExternalLink, ShieldAlert, KeyRound, Lock, ArrowRight, AlertCircle } from 'lucide-react';
+import { playNotificationSound, triggerNativeBrowserNotification } from './utils/notificationSound';
+import { PhoneCall, MapPin, Mail, CheckCircle2, MessageSquare, ExternalLink, ShieldAlert, KeyRound, Lock, ArrowRight, AlertCircle, Bell, X } from 'lucide-react';
 
 export default function App() {
   // Persistent Site Settings
@@ -127,48 +129,154 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('schedule');
   const [selectedStudentId, setSelectedStudentId] = useState<string>(students[0]?.id || 'std-001');
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [isTeacherRegisterOpen, setIsTeacherRegisterOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isNotificationDrawerOpen, setIsNotificationDrawerOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [floatingAlert, setFloatingAlert] = useState<AppNotification | null>(null);
+  const [hasRequestedNotifPermission, setHasRequestedNotifPermission] = useState(false);
 
   // Admin Guard Login State (for protected control panel access)
   const [guardIdentifier, setGuardIdentifier] = useState('');
   const [guardPassword, setGuardPassword] = useState('');
   const [guardError, setGuardError] = useState('');
 
-  // Initial Sync from Central Server Database (enables multi-device access)
+  // Auto-dismiss floating alert after 6 seconds
   useEffect(() => {
-    api.getFullData().then((serverData) => {
-      if (serverData) {
-        if (serverData.siteSettings) {
-          setSiteSettings((prev) => {
-            const hasRealToken = prev.telegramBotToken && !prev.telegramBotToken.includes('Sample') && prev.telegramBotToken.length > 15;
-            const serverHasSample = serverData.siteSettings.telegramBotToken?.includes('Sample');
-            if (hasRealToken && serverHasSample) {
-              const merged = {
-                ...serverData.siteSettings,
-                telegramBotToken: prev.telegramBotToken,
-                telegramChatId: prev.telegramChatId || serverData.siteSettings.telegramChatId,
-              };
-              api.saveSiteSettings(merged);
-              return merged;
-            }
-            return serverData.siteSettings;
-          });
-        }
-        if (serverData.adminUser) setAdminUser(serverData.adminUser);
-        if (Array.isArray(serverData.students)) {
-          setStudents(serverData.students.filter(s => !DEMO_STUDENT_IDS.has(s.id)));
-        }
-        if (Array.isArray(serverData.teachers)) {
-          setTeachers(serverData.teachers.filter(t => !DEMO_TEACHER_IDS.has(t.id)));
-        }
-        if (Array.isArray(serverData.sessions)) setSessions(serverData.sessions);
-        if (Array.isArray(serverData.activityLogs)) setActivityLogs(serverData.activityLogs);
+    if (!floatingAlert) return;
+    const t = setTimeout(() => {
+      setFloatingAlert(null);
+    }, 6000);
+    return () => clearTimeout(t);
+  }, [floatingAlert]);
+
+  // Two-way server database synchronization (ensures persistence & real-time mobile alerts)
+  const syncWithServer = React.useCallback(async (isLivePoll = false) => {
+    try {
+      const serverData = await api.getFullData();
+      if (!serverData) return;
+
+      if (serverData.siteSettings) {
+        setSiteSettings((prev) => {
+          const hasRealToken = prev.telegramBotToken && !prev.telegramBotToken.includes('Sample') && prev.telegramBotToken.length > 15;
+          const serverHasSample = serverData.siteSettings.telegramBotToken?.includes('Sample');
+          if (hasRealToken && serverHasSample) {
+            const merged = {
+              ...serverData.siteSettings,
+              telegramBotToken: prev.telegramBotToken,
+              telegramChatId: prev.telegramChatId || serverData.siteSettings.telegramChatId,
+            };
+            api.saveSiteSettings(merged);
+            return merged;
+          }
+          return { ...prev, ...serverData.siteSettings };
+        });
       }
-    });
-  }, []);
+
+      if (serverData.adminUser) setAdminUser(serverData.adminUser);
+
+      if (Array.isArray(serverData.students)) {
+        setStudents((prev) => {
+          const serverList = serverData.students.filter((s: any) => !DEMO_STUDENT_IDS.has(s.id));
+          const merged = [...serverList];
+          for (const s of prev) {
+            if (!merged.some(m => m.id === s.id)) {
+              merged.push(s);
+            }
+          }
+          return merged;
+        });
+      }
+
+      if (Array.isArray(serverData.teachers)) {
+        setTeachers((prev) => {
+          const serverList = serverData.teachers.filter((t: any) => !DEMO_TEACHER_IDS.has(t.id));
+          const merged = [...serverList];
+          for (const t of prev) {
+            if (!merged.some(m => m.id === t.id)) {
+              merged.push(t);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // Merge sessions smartly so locally scheduled sessions are NEVER wiped on update
+      if (Array.isArray(serverData.sessions)) {
+        setSessions((prev) => {
+          const merged = [...serverData.sessions];
+          for (const s of prev) {
+            if (!merged.some(m => m.id === s.id)) {
+              merged.push(s);
+              // Ensure server receives this locally retained session
+              api.addSession(s);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // Merge notifications smartly and trigger live alert if new notification arrived
+      if (Array.isArray(serverData.notifications)) {
+        const serverNotifs = serverData.notifications;
+        setNotifications((prev) => {
+          const prevIds = new Set(prev.map(n => n.id));
+          const newIncoming = serverNotifs.filter((n: any) => !prevIds.has(n.id));
+
+          // If this is a live background sync on phone/PC and new notification arrived
+          if (isLivePoll && newIncoming.length > 0) {
+            const latest = newIncoming[0];
+            setFloatingAlert(latest);
+            playNotificationSound();
+            triggerNativeBrowserNotification(latest.title, latest.message);
+            if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+              try { navigator.vibrate([200, 100, 200]); } catch {}
+            }
+          }
+
+          const merged = [...serverNotifs];
+          for (const n of prev) {
+            if (!merged.some(m => m.id === n.id)) {
+              merged.push(n);
+              api.addNotification(n);
+            }
+          }
+          return merged;
+        });
+      }
+
+      if (Array.isArray(serverData.activityLogs)) setActivityLogs(serverData.activityLogs);
+    } catch (e) {
+      // Offline fallback
+    }
+  }, [DEMO_STUDENT_IDS, DEMO_TEACHER_IDS]);
+
+  // Initial Sync & Live Background Polling (enables instant mobile sync with desktop)
+  useEffect(() => {
+    // 1. Initial sync
+    syncWithServer(false);
+
+    // 2. Poll every 8 seconds so phone catches new sessions & notifications immediately
+    const interval = setInterval(() => {
+      syncWithServer(true);
+    }, 8000);
+
+    // 3. Immediately sync when user switches back to browser tab or unlocks phone
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        syncWithServer(true);
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [syncWithServer]);
 
   // Sync to localStorage as offline cache
   useEffect(() => {
@@ -367,7 +475,7 @@ export default function App() {
     showToast('تم حفظ إعدادات وهوية الموقع بنجاح!');
   };
 
-  // Register New Student from standalone modal
+  // Register New Student
   const handleRegisterStudent = (newStudent: Student, newUser?: AppUser) => {
     setStudents((prev) => [newStudent, ...prev]);
     setSelectedStudentId(newStudent.id);
@@ -382,6 +490,7 @@ export default function App() {
         role: 'student',
         username: newStudent.username || newStudent.fullName,
         phone: newStudent.phone,
+        email: newStudent.email,
         password: newStudent.password || '123456',
         fullName: newStudent.fullName,
         relatedId: newStudent.id,
@@ -392,38 +501,118 @@ export default function App() {
       setCurrentUser(autoUser);
     }
 
-    // Auto notify Telegram if enabled
-    if (siteSettings.telegramBotEnabled && siteSettings.autoNotifyNewStudent) {
-      const notif: AppNotification = {
-        id: `notif-tg-${Date.now().toString().slice(-4)}`,
-        title: 'تسجيل تلميذ جديد',
-        message: `📢 انضم التلميذ ${newStudent.fullName} (${newStudent.stream}) إلى مبادرة ${siteSettings.siteName}.`,
-        date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
-        type: 'general',
-        targetRole: 'admins',
-        read: false,
-      };
-      setNotifications(prev => [notif, ...prev]);
+    // 1. Mandatory Admin Notification in in-app notification center
+    const adminNotif: AppNotification = {
+      id: `notif-std-${Date.now()}`,
+      title: 'تسجيل تلميذ جديد 🎓',
+      message: `تم تسجيل تلميذ جديد: ${newStudent.fullName} | الهاتف: ${newStudent.phone || '–'} | البريد: ${newStudent.email || '–'}`,
+      date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+      type: 'general',
+      targetRole: 'admins',
+      read: false,
+    };
+    setNotifications((prev) => [adminNotif, ...prev]);
+    api.addNotification(adminNotif);
+    setFloatingAlert(adminNotif);
+
+    // Play instant audio chime and trigger native notification on phone & PC
+    playNotificationSound();
+    triggerNativeBrowserNotification(adminNotif.title, adminNotif.message);
+
+    // 2. Activity Log
+    addActivityLog(
+      'تسجيل تلميذ جديد',
+      `انضم التلميذ ${newStudent.fullName} (الهاتف: ${newStudent.phone || '–'} - البريد: ${newStudent.email || '–'}).`,
+      'student'
+    );
+
+    // 3. Auto notify Telegram if enabled
+    if (siteSettings.telegramBotEnabled) {
+      api.broadcastTelegram(
+        `📢 *تسجيل تلميذ جديد في ${siteSettings.siteName}*\n\n` +
+        `👤 *الاسم واللقب:* ${newStudent.fullName}\n` +
+        `📱 *الهاتف:* ${newStudent.phone}\n` +
+        `📧 *البريد:* ${newStudent.email || '–'}\n` +
+        `⏰ *الوقت:* ${new Date().toLocaleTimeString('ar-DZ')}`
+      );
     }
 
-    showToast(`أهلاً بك يا ${newStudent.fullName}! تم إنشاء حسابك وبطاقتك الرسمية`);
+    // 4. Auto notify WhatsApp Channel if enabled
+    if (siteSettings.whatsappBotEnabled && siteSettings.autoNotifyWhatsAppNewStudent) {
+      api.broadcastWhatsApp(
+        `📢 *تسجيل تلميذ جديد في ${siteSettings.siteName}*\n\n` +
+        `👤 *الاسم واللقب:* ${newStudent.fullName}\n` +
+        `📱 *الهاتف:* ${newStudent.phone}\n` +
+        `📧 *البريد:* ${newStudent.email || '–'}\n` +
+        `⏰ *الوقت:* ${new Date().toLocaleTimeString('ar-DZ')}`,
+        siteSettings.whatsappChannelUrl
+      ).catch(() => {});
+    }
+
+    showToast(`أهلاً بك يا ${newStudent.fullName}! تم إنشاء حسابك وبطاقتك الرسمية وإشعار الإدارة فوراً`);
     setActiveTab('student_card');
   };
 
   // Register Student from AuthModal
   const handleRegisterStudentFromAuth = (newStudent: Student, newUser: AppUser) => {
-    setStudents((prev) => [newStudent, ...prev]);
-    setCurrentUser(newUser);
-    setSelectedStudentId(newStudent.id);
-    showToast(`أهلاً بك يا ${newStudent.fullName}! تم إنشاء حسابك`);
-    setActiveTab('student_card');
+    handleRegisterStudent(newStudent, newUser);
   };
 
-  // Register Teacher from AuthModal
-  const handleRegisterTeacherFromAuth = (newTeacher: Teacher, newUser: AppUser) => {
+  // Register Teacher
+  const handleRegisterTeacher = (newTeacher: Teacher, newUser: AppUser) => {
     setTeachers((prev) => [newTeacher, ...prev]);
     setCurrentUser(newUser);
-    showToast(`أهلاً بالأستاذ ${newTeacher.fullName}! تم تفعيل فضاء الأستاذ`);
+    api.addTeacher(newTeacher);
+
+    // 1. Mandatory Admin Notification in in-app notification center
+    const adminNotif: AppNotification = {
+      id: `notif-tch-${Date.now()}`,
+      title: 'تسجيل أستاذ جديد 👨‍🏫',
+      message: `تم تسجيل أستاذ متطوع جديد: ${newTeacher.fullName} | الهاتف: ${newTeacher.phone || '–'} | البريد: ${newTeacher.email || '–'}`,
+      date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+      type: 'general',
+      targetRole: 'admins',
+      read: false,
+    };
+    setNotifications((prev) => [adminNotif, ...prev]);
+    api.addNotification(adminNotif);
+    setFloatingAlert(adminNotif);
+
+    // Play instant audio chime and trigger native notification on phone & PC
+    playNotificationSound();
+    triggerNativeBrowserNotification(adminNotif.title, adminNotif.message);
+
+    // 2. Activity Log
+    addActivityLog(
+      'تسجيل أستاذ جديد',
+      `انضم الأستاذ ${newTeacher.fullName} إلى طاقم الجمعية (الهاتف: ${newTeacher.phone || '–'} - البريد: ${newTeacher.email || '–'}).`,
+      'teacher'
+    );
+
+    // 3. Auto notify Telegram if enabled
+    if (siteSettings.telegramBotEnabled) {
+      api.broadcastTelegram(
+        `📢 *تسجيل أستاذ متطوع جديد في ${siteSettings.siteName}*\n\n` +
+        `👨‍🏫 *الاسم واللقب:* ${newTeacher.fullName}\n` +
+        `📱 *الهاتف:* ${newTeacher.phone}\n` +
+        `📧 *البريد:* ${newTeacher.email || '–'}\n` +
+        `⏰ *الوقت:* ${new Date().toLocaleTimeString('ar-DZ')}`
+      );
+    }
+
+    // 4. Auto notify WhatsApp Channel if enabled
+    if (siteSettings.whatsappBotEnabled) {
+      api.broadcastWhatsApp(
+        `📢 *تسجيل أستاذ متطوع جديد في ${siteSettings.siteName}*\n\n` +
+        `👨‍🏫 *الاسم واللقب:* ${newTeacher.fullName}\n` +
+        `📱 *الهاتف:* ${newTeacher.phone}\n` +
+        `📧 *البريد:* ${newTeacher.email || '–'}\n` +
+        `⏰ *الوقت:* ${new Date().toLocaleTimeString('ar-DZ')}`,
+        siteSettings.whatsappChannelUrl
+      ).catch(() => {});
+    }
+
+    showToast(`أهلاً بالأستاذ ${newTeacher.fullName}! تم تفعيل فضاء الأستاذ وإشعار الإدارة فوراً`);
     setActiveTab('teacher_space');
   };
 
@@ -446,13 +635,30 @@ export default function App() {
       read: false,
     };
     setNotifications((prev) => [notif, ...prev]);
+    api.addNotification(notif);
+    setFloatingAlert(notif);
+
+    // Play instant audio chime and trigger native notification on phone & PC
+    playNotificationSound();
+    triggerNativeBrowserNotification(notif.title, notif.message);
 
     // Record activity log
     addActivityLog(
       'برمجة حصة دعم',
-      `تمت إضافة حصة ${newSession.subject} (${newSession.title}) للأستاذ ${newSession.teacherName} ونشرها تلقائياً على تيليجرام.`,
+      `تمت إضافة حصة ${newSession.subject} (${newSession.title}) للأستاذ ${newSession.teacherName} ونشرها تلقائياً على تيليجرام وواتساب.`,
       'session'
     );
+
+    const broadcastText = 
+      `📢 *برمجة حصة دعم جديدة - ${siteSettings.siteName}*\n\n` +
+      `📚 *المادة:* ${newSession.subject}\n` +
+      `🎯 *موضوع الحصة:* ${newSession.title}\n` +
+      `🎓 *الشعبة:* ${newSession.stream}\n` +
+      `👨‍🏫 *الأستاذ المؤطر:* ${newSession.teacherName}\n` +
+      `⏰ *التوقيت:* ${newSession.timeText}\n` +
+      `📍 *المقر:* ${newSession.location}\n\n` +
+      `📌 *ملاحظة:* المقاعد محدودة، يرجى تأكيد الحضور عبر المنصة.\n` +
+      `🔗 *رابط المنصة:* https://badhrat-ghad.dz`;
 
     // Direct client-side telegram dispatch if enabled
     if (siteSettings.telegramBotEnabled && siteSettings.autoNotifyNewSession) {
@@ -460,25 +666,17 @@ export default function App() {
       const chatId = siteSettings.telegramChatId?.trim();
       const isRealToken = token && token.length > 20 && token.includes(':') && !token.includes('Sample');
 
-      const tgText = 
-        `📢 *برمجة حصة دعم جديدة - ${siteSettings.siteName}*\n\n` +
-        `📚 *المادة:* ${newSession.subject}\n` +
-        `🎯 *موضوع الحصة:* ${newSession.title}\n` +
-        `🎓 *الشعبة:* ${newSession.stream}\n` +
-        `👨‍🏫 *الأستاذ المؤطر:* ${newSession.teacherName}\n` +
-        `⏰ *التوقيت:* ${newSession.timeText}\n` +
-        `📍 *المقر:* ${newSession.location}\n\n` +
-        `📌 *ملاحظة:* المقاعد محدودة، يرجى تأكيد الحضور عبر المنصة.\n` +
-        `🔗 *رابط المنصة:* https://badhrat-ghad.dz`;
-
       if (isRealToken && chatId) {
-        api.broadcastTelegram(tgText).catch(() => {});
+        api.broadcastTelegram(broadcastText).catch(() => {});
       }
-
-      showToast(`تمت برمجة حصة ${newSession.subject} ونشرها تلقائياً على قناة التليجرام!`);
-    } else {
-      showToast(`تمت برمجة حصة ${newSession.subject} بنجاح!`);
     }
+
+    // Direct client-side WhatsApp dispatch if enabled
+    if (siteSettings.whatsappBotEnabled && siteSettings.autoNotifyWhatsAppNewSession) {
+      api.broadcastWhatsApp(broadcastText, siteSettings.whatsappChannelUrl).catch(() => {});
+    }
+
+    showToast(`تمت برمجة حصة ${newSession.subject} ونشر إشعارها التلقائي بنجاح!`);
   };
 
   // Delete Support Session (Teachers and Admin)
@@ -778,13 +976,14 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-stone-50 font-sans text-stone-900 selection:bg-emerald-700 selection:text-white">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden flex flex-col bg-stone-50 font-sans text-stone-900 selection:bg-emerald-700 selection:text-white">
       
       {/* Top Bar Navigation */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onOpenRegister={() => setIsRegisterOpen(true)}
+        onOpenRegisterStudent={() => setIsRegisterOpen(true)}
+        onOpenRegisterTeacher={() => setIsTeacherRegisterOpen(true)}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         currentUser={currentUser}
         onLogout={handleLogout}
@@ -793,6 +992,41 @@ export default function App() {
         siteSettings={siteSettings}
         onOpenProfileModal={() => setIsProfileModalOpen(true)}
       />
+
+      {/* Real-time Floating Notification Banner (Mobile & Desktop) */}
+      {floatingAlert && (
+        <div className="fixed top-4 left-4 right-4 sm:left-auto sm:right-6 sm:max-w-md z-50 bg-stone-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-emerald-500/60 animate-bounce-short text-right">
+          <div className="flex items-start justify-between gap-3">
+            <button
+              onClick={() => setFloatingAlert(null)}
+              className="text-stone-400 hover:text-white p-1 rounded-md shrink-0 cursor-pointer"
+              aria-label="إغلاق"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-amber-300 text-xs font-black mb-1">
+                <Bell className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="truncate">{floatingAlert.title}</span>
+              </div>
+              <p className="text-xs text-stone-200 line-clamp-2 leading-relaxed">
+                {floatingAlert.message}
+              </p>
+              <div className="mt-2.5 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setFloatingAlert(null);
+                    setIsNotificationDrawerOpen(true);
+                  }}
+                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold cursor-pointer transition-colors"
+                >
+                  فتح مركز الإشعارات
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Alert */}
       {toastMessage && (
@@ -813,6 +1047,7 @@ export default function App() {
             onOpenTeacherSpace={() => setActiveTab('teacher_space')}
             onOpenRegister={() => setIsRegisterOpen(true)}
             onOpenAuth={() => setIsAuthModalOpen(true)}
+            onAddSession={handleAddSession}
             onDeleteSession={handleDeleteSession}
             onToggleHideSession={(id) => handleToggleHideSession(id, !sessions.find(s => s.id === id)?.isHidden)}
           />
@@ -1039,18 +1274,25 @@ export default function App() {
         currentUser={currentUser}
         onLogin={handleLogin}
         onRegisterStudent={handleRegisterStudentFromAuth}
-        onRegisterTeacher={handleRegisterTeacherFromAuth}
+        onRegisterTeacher={handleRegisterTeacher}
         onUpdatePassword={handleUpdatePassword}
         allStudents={students}
         allTeachers={teachers}
         adminUser={adminUser}
       />
 
-      {/* Standalone Registration Modal */}
+      {/* Standalone Student Registration Modal */}
       <StudentRegistrationModal
         isOpen={isRegisterOpen}
         onClose={() => setIsRegisterOpen(false)}
         onRegister={handleRegisterStudent}
+      />
+
+      {/* Standalone Teacher Registration Modal */}
+      <TeacherRegistrationModal
+        isOpen={isTeacherRegisterOpen}
+        onClose={() => setIsTeacherRegisterOpen(false)}
+        onRegister={handleRegisterTeacher}
       />
 
       {/* Notification Drawer */}
@@ -1132,9 +1374,16 @@ export default function App() {
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
+                {siteSettings.whatsappChannelUrl && (
+                  <a href={siteSettings.whatsappChannelUrl} target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1">
+                    <span>قناة الواتساب</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
                 {siteSettings.whatsappContact && (
                   <a href={`https://wa.me/${siteSettings.whatsappContact}`} target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1">
-                    <span>WhatsApp</span>
+                    <span>واتساب</span>
+                    <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
               </div>

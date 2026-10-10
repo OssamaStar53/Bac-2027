@@ -135,8 +135,9 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/70 backdrop-blur-xs p-3 md:p-6 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-4xl w-full flex flex-col max-h-[92vh] shadow-2xl border border-stone-200 overflow-hidden text-right">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/70 backdrop-blur-xs p-2 sm:p-4 md:p-6">
+      <div className="min-h-full flex items-center justify-center py-2 sm:py-4">
+        <div className="bg-white rounded-2xl sm:rounded-3xl max-w-4xl w-full flex flex-col shadow-2xl border border-stone-200 overflow-hidden text-right">
         
         {/* Top Action & Title Bar */}
         <div className="bg-stone-900 text-white p-4 md:px-6 flex flex-wrap items-center justify-between gap-3 border-b border-stone-800">
@@ -417,21 +418,21 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 bg-white border-t border-stone-200 flex items-center justify-between flex-wrap gap-2">
-          <div className="text-xs text-stone-500">
+        <div className="p-3.5 sm:p-4 bg-white border-t border-stone-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="text-xs text-stone-500 text-center sm:text-right">
             يمكنك حفظ الملف بصيغة PDF وطباعته مجاناً في أي وقت.
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-stone-600 hover:text-stone-900 transition-colors"
+              className="px-4 py-2 text-xs font-semibold text-stone-600 hover:text-stone-900 transition-colors bg-stone-100 sm:bg-transparent rounded-xl text-center"
             >
               إغلاق
             </button>
             <button
               onClick={handleDownload}
-              className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+              className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer text-center"
             >
               <FileDown className="w-4 h-4" />
               <span>تحميل المستند الآن بصيغة PDF</span>
@@ -439,6 +440,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
           </div>
         </div>
 
+        </div>
       </div>
     </div>
   );

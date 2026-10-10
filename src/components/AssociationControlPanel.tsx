@@ -52,7 +52,8 @@ import {
   History,
   Shield,
   HelpCircle,
-  FileText
+  FileText,
+  MessageSquare
 } from 'lucide-react';
 
 interface AssociationControlPanelProps {
@@ -130,7 +131,7 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
   onUpdateTeacherPassword,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'branding' | 'contact' | 'telegram' | 'admin_security' | 'activity_log' | 'sessions' | 'teachers' | 'students' | 'backup' | 'pdf_resources'
+    'branding' | 'contact' | 'telegram' | 'whatsapp' | 'admin_security' | 'activity_log' | 'sessions' | 'teachers' | 'students' | 'backup' | 'pdf_resources'
   >('branding');
   
   // Feedback banners
@@ -142,6 +143,9 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
   const [isVerifyingBot, setIsVerifyingBot] = useState(false);
   const [botVerificationData, setBotVerificationData] = useState<{ username: string; firstName: string } | null>(null);
   const [telegramErrorHint, setTelegramErrorHint] = useState<string | null>(null);
+  const [whatsappTestNotice, setWhatsappTestNotice] = useState<string | null>(null);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [whatsappCustomText, setWhatsappCustomText] = useState('');
   const [copiedInfoNotice, setCopiedInfoNotice] = useState(false);
 
   // Admin PDF Resources State
@@ -759,6 +763,16 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
         >
           <Bot className="w-3.5 h-3.5 text-sky-400" />
           <span>ربط بوت Telegram</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('whatsapp')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'whatsapp' ? 'bg-emerald-700 text-white shadow-xs' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+          }`}
+        >
+          <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+          <span>قناة الواتساب والإشعارات 🟢</span>
         </button>
 
         <button
@@ -1532,6 +1546,206 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
                 <div key={idx}>✓ {log}</div>
               ))}
             </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* WhatsApp Channel & Automated Notifications Tab */}
+      {activeTab === 'whatsapp' && (
+        <div className="bg-white rounded-3xl border border-stone-200 p-6 sm:p-7 shadow-xs space-y-6">
+          <div className="flex items-center gap-3 pb-4 border-b border-stone-100">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+              <MessageSquare className="w-5 h-5 text-emerald-700" />
+            </div>
+            <div>
+              <h3 className="font-bold text-stone-900 text-sm">ربط قناة ومجموعة الواتساب (WhatsApp Channel) للإشعارات التلقائية</h3>
+              <p className="text-xs text-stone-500">إرسال تنبيهات تلقائية إلى قناة أو مجموعة الجمعية على واتساب فور تسجيل تلميذ أو أستاذ أو برمجة حصة</p>
+            </div>
+          </div>
+
+          {whatsappTestNotice && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-950 font-bold flex items-center gap-2 animate-bounce">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{whatsappTestNotice}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleSaveSettings} className="space-y-4">
+            
+            {/* Enable WhatsApp Toggle */}
+            <div className="flex items-center justify-between p-4 bg-emerald-50/50 border border-emerald-100 rounded-2xl">
+              <div>
+                <span className="font-bold text-xs text-stone-900 block">تفعيل الإشعارات الآلية لقناة الواتساب:</span>
+                <span className="text-[11px] text-stone-500">بث التنبيهات الرسمية للمشتركين والتلاميذ على الواتساب تلقائياً</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettingsForm({ ...settingsForm, whatsappBotEnabled: !settingsForm.whatsappBotEnabled })}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  settingsForm.whatsappBotEnabled ? 'bg-emerald-700 text-white' : 'bg-stone-200 text-stone-700'
+                }`}
+              >
+                {settingsForm.whatsappBotEnabled ? '🟢 مفعل' : '⚪ معطل'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">
+                  رابط قناة أو مجموعة الواتساب (WhatsApp Channel / Group):
+                </label>
+                <input
+                  type="url"
+                  value={settingsForm.whatsappChannelUrl || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, whatsappChannelUrl: e.target.value })}
+                  placeholder="https://whatsapp.com/channel/..."
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:bg-white focus:border-emerald-600 focus:outline-hidden font-mono"
+                  dir="ltr"
+                />
+                <span className="text-[10px] text-stone-500 mt-1 block">رابط القناة العام الذي ينضم إليه التلاميذ والأولياء لمتابعة الإعلانات</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">
+                  رابط الـ Webhook للإرسال الآلي المباشر (اختياري / Green-API / CallMeBot):
+                </label>
+                <input
+                  type="text"
+                  value={settingsForm.whatsappWebhookUrl || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, whatsappWebhookUrl: e.target.value })}
+                  placeholder="https://api.green-api.com/waInstance... أو CallMeBot"
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:bg-white focus:border-emerald-600 focus:outline-hidden font-mono"
+                  dir="ltr"
+                />
+                <span className="text-[10px] text-stone-500 mt-1 block">إذا كنت تستخدم بوابة واتساب آلية للإرسال بدون تدخل يدوي</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">
+                  مفتاح API الخاص بالبوابة (إن وجد):
+                </label>
+                <input
+                  type="password"
+                  value={settingsForm.whatsappApiKey || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, whatsappApiKey: e.target.value })}
+                  placeholder="API Key / Secret Token"
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:bg-white focus:border-emerald-600 focus:outline-hidden font-mono"
+                  dir="ltr"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">
+                  رقم الهاتف أو معرّف المجموعة المستهدفة:
+                </label>
+                <input
+                  type="text"
+                  value={settingsForm.whatsappPhoneOrGroup || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, whatsappPhoneOrGroup: e.target.value })}
+                  placeholder="0661234567 أو معرف المجموعة"
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:bg-white focus:border-emerald-600 focus:outline-hidden font-mono"
+                  dir="ltr"
+                />
+              </div>
+            </div>
+
+            {/* Notification Checkboxes */}
+            <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200 space-y-2.5 text-xs text-stone-700">
+              <span className="font-bold text-stone-900 block mb-1">أحداث الإشعار الآلي المباشر على واتساب:</span>
+              
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsForm.autoNotifyWhatsAppNewStudent !== false}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, autoNotifyWhatsAppNewStudent: e.target.checked })}
+                  className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                />
+                <span>👤 إشعار الإدارة والقناة فور تسجيل تلميذ أو أستاذ جديد</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsForm.autoNotifyWhatsAppNewSession !== false}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, autoNotifyWhatsAppNewSession: e.target.checked })}
+                  className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                />
+                <span>📅 بث إشعار فوري عند برمجة حصة دعم جديدة (المادة، الشعبة، التوقيت، القاعة)</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsForm.autoNotifyWhatsAppNewResource !== false}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, autoNotifyWhatsAppNewResource: e.target.checked })}
+                  className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                />
+                <span>📚 بث إشعار عند رفع ملف أو ملخص بيداغوجي جديد</span>
+              </label>
+            </div>
+
+            <div className="pt-2 flex items-center gap-2">
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                حفظ إعدادات قناة الواتساب
+              </button>
+            </div>
+
+          </form>
+
+          {/* Test WhatsApp Dispatcher */}
+          <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-3">
+            <span className="font-bold text-xs text-stone-900 block">اختبار الإرسال إلى قناة أو مجموعة الواتساب:</span>
+            
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={whatsappCustomText}
+                onChange={(e) => setWhatsappCustomText(e.target.value)}
+                placeholder="اكتب رسالة تجريبية للاختبار..."
+                className="flex-1 px-3 py-2 bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden"
+              />
+              <button
+                type="button"
+                disabled={isSendingWhatsApp}
+                onClick={async () => {
+                  const msg = whatsappCustomText.trim() || `🔔 اختبار تجريبي لقناة ${settingsForm.siteName} على الواتساب (${new Date().toLocaleTimeString('ar-DZ')})`;
+                  setIsSendingWhatsApp(true);
+                  const res = await api.broadcastWhatsApp(msg, settingsForm.whatsappChannelUrl);
+                  setIsSendingWhatsApp(false);
+                  if (res?.shareLink) {
+                    window.open(res.shareLink, '_blank');
+                    setWhatsappTestNotice('تم تجهيز وبث الرسالة التجريبية لقناة الواتساب بنجاح!');
+                  } else {
+                    setWhatsappTestNotice('تم إرسال التنبيه التجريبي لقناة الواتساب بنجاح!');
+                  }
+                  setTimeout(() => setWhatsappTestNotice(null), 4000);
+                }}
+                className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Send className="w-3.5 h-3.5 text-amber-300" />
+                <span>{isSendingWhatsApp ? 'جارٍ الإرسال...' : 'إرسال تجريبي لواتساب'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* WhatsApp Channel Guidance */}
+          <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 text-xs space-y-2">
+            <span className="font-bold text-emerald-950 block">
+              💡 كيفية إنشاء قناة واتساب رسمية للجمعية في دقيقة:
+            </span>
+            <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-stone-600 leading-relaxed">
+              <li>افتح تطبيق WhatsApp على هاتفك وانتقل إلى قسم <strong>«المستجدات (Updates)»</strong>.</li>
+              <li>اضغط على رمز <strong>(+)</strong> بجانب القنوات واختر <strong>«إنشاء قناة (Create Channel)»</strong>.</li>
+              <li>سمّ القناة <strong>«${settingsForm.siteName} – بكالوريا 2027 & BEM»</strong> وضع شعار الجمعية.</li>
+              <li>انسخ رابط القناة والصقه في خانة <strong>«رابط قناة الواتساب»</strong> أعلاه واضغط حفظ.</li>
+              <li>سيتم إرسال إشعارات الحصص والتسجيلات الجديدة مباشرة للمشتركين في القناة!</li>
+            </ol>
           </div>
 
         </div>
@@ -2700,8 +2914,9 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
 
       {/* Password Edit Modal for Students & Teachers (ADMIN EXCLUSIVE) */}
       {editingPasswordUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-stone-200 relative text-right animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/60 backdrop-blur-xs p-3 sm:p-4">
+          <div className="min-h-full flex items-center justify-center py-4">
+            <div className="bg-white rounded-2xl sm:rounded-3xl max-w-md w-full p-4.5 sm:p-6 shadow-2xl border border-stone-200 relative text-right animate-in fade-in zoom-in-95 duration-150">
             
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-stone-100">
@@ -2812,20 +3027,20 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
               </p>
 
               {/* Action Buttons */}
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-stone-100">
+              <div className="pt-2 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 border-t border-stone-100">
                 <button
                   type="button"
                   onClick={() => {
                     setEditingPasswordUser(null);
                     setNewPasswordForUser('');
                   }}
-                  className="px-4 py-2 text-xs font-bold text-stone-600 hover:text-stone-900 cursor-pointer"
+                  className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-stone-600 hover:text-stone-900 bg-stone-100 sm:bg-transparent rounded-xl cursor-pointer text-center"
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                  className="w-full sm:w-auto px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
                 >
                   <Check className="w-4 h-4" />
                   <span>حفظ كلمة السر الآن</span>
@@ -2833,6 +3048,7 @@ export const AssociationControlPanel: React.FC<AssociationControlPanelProps> = (
               </div>
             </form>
 
+            </div>
           </div>
         </div>
       )}

@@ -221,27 +221,13 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
             </div>
           </div>
 
-          <div className="shrink-0 w-full lg:w-auto flex flex-wrap sm:flex-nowrap items-center gap-2">
-            <button
-              onClick={onOpenRegister}
-              className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors flex items-center justify-center gap-1.5 shadow-xs"
-            >
-              <GraduationCap className="w-4 h-4 text-amber-300 shrink-0" />
-              <span>تسجيل تلميذ جديد</span>
-            </button>
-            <button
-              onClick={onOpenRegisterTeacher || onOpenAuth}
-              className="flex-1 sm:flex-initial px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors flex items-center justify-center gap-1.5 shadow-xs"
-            >
-              <School className="w-4 h-4 text-blue-200 shrink-0" />
-              <span>تسجيل أستاذ</span>
-            </button>
+          <div className="shrink-0 w-full sm:w-auto">
             <button
               onClick={onOpenAuth}
-              className="w-full sm:w-auto px-3.5 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors flex items-center justify-center gap-1.5"
+              className="w-full sm:w-auto px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors text-center flex items-center justify-center gap-1.5 shadow-xs"
             >
-              <LogIn className="w-4 h-4 text-amber-300 shrink-0" />
-              <span>تسجيل الدخول</span>
+              <LogIn className="w-3.5 h-3.5 text-amber-300" />
+              <span>دخول الحساب</span>
             </button>
           </div>
         </div>
@@ -347,67 +333,6 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
           </p>
         </div>
       </div>
-
-      {/* Welcome Registration Gateway for New Visitors (Clear & Mobile Friendly) */}
-      {!currentUser && (
-        <div className="mb-8 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          {/* Card 1: تسجيل تلميذ جديد */}
-          <div className="bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/40 rounded-2xl p-4 sm:p-5 border border-emerald-300/80 shadow-xs hover:border-emerald-500 hover:shadow-md transition-all flex flex-col justify-between gap-3 group">
-            <div className="flex items-start gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-emerald-700 text-white flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
-                <GraduationCap className="w-6 h-6 text-amber-300" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <h3 className="text-sm sm:text-base font-black text-emerald-950">تسجيل تلميذ جديد</h3>
-                  <span className="text-[10px] bg-emerald-200 text-emerald-900 font-extrabold px-1.5 py-0.5 rounded-md">مجاني</span>
-                </div>
-                <p className="text-xs text-stone-600 mt-1 leading-relaxed">
-                  مرافقة البكالوريا 2027 وشهادة التعليم المتوسط (BEM): حجز مقعدك بدار الشباب، استخراج بطاقتك الرقمية، وحل التمارين والاختبارات المصححة.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={onOpenRegister}
-              className="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <GraduationCap className="w-4 h-4 text-amber-300" />
-              <span>تسجيل حساب تلميذ جديد الآن</span>
-              <ArrowRight className="w-3.5 h-3.5 mr-auto" />
-            </button>
-          </div>
-
-          {/* Card 2: تسجيل أستاذ متطوع */}
-          <div className="bg-gradient-to-br from-blue-50/90 via-white to-blue-50/40 rounded-2xl p-4 sm:p-5 border border-blue-300/80 shadow-xs hover:border-blue-500 hover:shadow-md transition-all flex flex-col justify-between gap-3 group">
-            <div className="flex items-start gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-blue-800 text-white flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
-                <School className="w-6 h-6 text-blue-200" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <h3 className="text-sm sm:text-base font-black text-blue-950">تسجيل أستاذ متطوع</h3>
-                  <span className="text-[10px] bg-blue-200 text-blue-900 font-extrabold px-1.5 py-0.5 rounded-md">تأطير</span>
-                </div>
-                <p className="text-xs text-stone-600 mt-1 leading-relaxed">
-                  انضم إلى فريق الأساتذة المؤطرين بدار الشباب لمرافقة نخب الولاية، برمجة وتحديد مواعيد الحصص، ومشاركة السلاسل مع التلاميذ.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={onOpenRegisterTeacher || onOpenAuth}
-              className="w-full py-2.5 px-4 bg-blue-800 hover:bg-blue-900 active:bg-blue-950 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <School className="w-4 h-4 text-blue-200" />
-              <span>انضمام كأستاذ مؤطر متطوع</span>
-              <ArrowRight className="w-3.5 h-3.5 mr-auto" />
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Level Tabs and Stream / Search Filter Bar */}
       <div className="space-y-3 mb-8">

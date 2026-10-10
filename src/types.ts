@@ -288,4 +288,6 @@ export interface AppNotification {
   targetRole?: 'all' | 'students' | 'teachers' | 'admins';
   targetTeacherId?: string; // if specifically for one teacher
   read: boolean;
+  createdAt?: string | number | Date;
+  timestamp?: number;
 }

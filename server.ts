@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { db as pgDb, withDbRetry } from './src/db/index.ts';
 import * as schema from './src/db/schema.ts';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { requireAuth, type AuthRequest } from './src/middleware/auth.ts';
 import { getOrCreateUser, getUsers } from './src/db/users.ts';
 
@@ -72,15 +72,23 @@ async function ensureCloudSqlSeeded() {
       console.warn('Could not check or seed site_settings table:', e);
     }
 
-    // Purge legacy demo accounts from Cloud SQL if present
+    // Purge legacy demo accounts, demo sessions, and demo notifications from Cloud SQL
     try {
       const DEMO_STUDENT_IDS = ['std-001', 'std-002', 'std-003', 'std-004', 'std-005', 'std-006', 'std-007'];
       const DEMO_TEACHER_IDS = ['tch-001', 'tch-002', 'tch-003', 'tch-004', 'tch-005'];
+      const DEMO_SESSION_IDS = ['ses-101', 'ses-102', 'ses-103', 'ses-104'];
+      const DEMO_NOTIF_IDS = ['notif-01', 'notif-02', 'notif-03', 'notif-04', 'notif-t-01', 'notif-t-02'];
       for (const id of DEMO_STUDENT_IDS) {
         await withDbRetry(() => pgDb.delete(schema.students).where(eq(schema.students.id, id)));
       }
       for (const id of DEMO_TEACHER_IDS) {
         await withDbRetry(() => pgDb.delete(schema.teachers).where(eq(schema.teachers.id, id)));
+      }
+      for (const id of DEMO_SESSION_IDS) {
+        await withDbRetry(() => pgDb.delete(schema.supportSessions).where(eq(schema.supportSessions.id, id)));
+      }
+      for (const id of DEMO_NOTIF_IDS) {
+        await withDbRetry(() => pgDb.delete(schema.appNotifications).where(eq(schema.appNotifications.id, id)));
       }
     } catch (e) {}
 
@@ -139,7 +147,9 @@ async function ensureCloudSqlSeeded() {
           }
         }
         if (dbData.sessions && dbData.sessions.length > 0) {
+          const DEMO_SESSIONS = new Set(['ses-101', 'ses-102', 'ses-103', 'ses-104']);
           for (const ses of dbData.sessions) {
+            if (DEMO_SESSIONS.has(ses.id)) continue;
             await withDbRetry(() =>
               pgDb.insert(schema.supportSessions).values({
                 id: ses.id,
@@ -304,18 +314,18 @@ async function startServer() {
             }
           }),
 
-          // 4. Load sessions from Cloud SQL and merge with file cache
+          // 4. Load sessions from Cloud SQL and merge with file cache (excluding demo sessions)
           withDbRetry(async () => {
+            const DEMO_SESSIONS = new Set(['ses-101', 'ses-102', 'ses-103', 'ses-104']);
             const sqlSessions = await pgDb.select().from(schema.supportSessions);
-            if (sqlSessions && sqlSessions.length > 0) {
-              const mergedSessions = [...sqlSessions];
-              for (const s of (db.sessions || [])) {
-                if (!mergedSessions.some((m: any) => m.id === s.id)) {
-                  mergedSessions.push(s);
-                }
+            const validSqlSessions = (sqlSessions || []).filter((s: any) => !DEMO_SESSIONS.has(s.id));
+            const mergedSessions = [...validSqlSessions];
+            for (const s of (db.sessions || [])) {
+              if (!DEMO_SESSIONS.has(s.id) && !mergedSessions.some((m: any) => m.id === s.id)) {
+                mergedSessions.push(s);
               }
-              db.sessions = mergedSessions;
             }
+            db.sessions = mergedSessions;
           }),
 
           // 5. Load resources from Cloud SQL
@@ -342,20 +352,38 @@ async function startServer() {
             }
           }),
 
-          // 8. Load notifications from Cloud SQL and merge with file cache
+          // 8. Load notifications from Cloud SQL and merge with file cache (newest on top, excluding demo notifications)
           withDbRetry(async () => {
-            const sqlNotifs = await pgDb.select().from(schema.appNotifications);
-            if (sqlNotifs && sqlNotifs.length > 0) {
-              const mergedNotifs = [...sqlNotifs];
-              for (const n of (db.notifications || [])) {
-                if (!mergedNotifs.some((m: any) => m.id === n.id)) {
-                  mergedNotifs.push(n);
-                }
+            const DEMO_NOTIFS = new Set(['notif-01', 'notif-02', 'notif-03', 'notif-04', 'notif-t-01', 'notif-t-02']);
+            const sqlNotifs = await pgDb
+              .select()
+              .from(schema.appNotifications)
+              .orderBy(desc(schema.appNotifications.createdAt));
+            const validSqlNotifs = (sqlNotifs || []).filter((n: any) => !DEMO_NOTIFS.has(n.id));
+            const mergedNotifs = [...validSqlNotifs];
+            for (const n of (db.notifications || [])) {
+              if (!DEMO_NOTIFS.has(n.id) && !mergedNotifs.some((m: any) => m.id === n.id)) {
+                mergedNotifs.push(n);
               }
-              db.notifications = mergedNotifs;
-            } else if (!db.notifications) {
-              db.notifications = [];
             }
+            // Strict newest-first sorting (extract numeric timestamp reliably)
+            mergedNotifs.sort((a: any, b: any) => {
+              const getTime = (x: any) => {
+                if (typeof x.timestamp === 'number' && x.timestamp > 0) return x.timestamp;
+                if (x.createdAt) {
+                  const t = new Date(x.createdAt).getTime();
+                  if (!isNaN(t) && t > 0) return t;
+                }
+                const match = x.id?.match(/\d+/g);
+                if (match && match.length > 0) {
+                  const val = parseInt(match[match.length - 1], 10);
+                  if (!isNaN(val) && val > 1000000000) return val;
+                }
+                return 0;
+              };
+              return getTime(b) - getTime(a);
+            });
+            db.notifications = mergedNotifs;
           }),
         ]);
       } catch (err) {
@@ -1198,6 +1226,7 @@ async function startServer() {
 
     const session = req.body;
     if (!db.sessions) db.sessions = [];
+    db.sessions = db.sessions.filter((s: any) => s.id !== session.id);
     db.sessions.unshift(session);
 
     if (!db.activityLogs) db.activityLogs = [];
@@ -1210,8 +1239,9 @@ async function startServer() {
     });
 
     // Automatically record persistent notification for upcoming session
+    const notifTimestamp = Date.now();
     const sessionNotif = {
-      id: `notif-ses-${Date.now().toString().slice(-6)}`,
+      id: `notif-ses-${notifTimestamp}`,
       title: `حصة دعم جديدة: ${session.subject}`,
       message: `🔔 تذكير: حصة ${session.subject} (${session.title}) يوم ${session.timeText} بـ ${session.location}.`,
       date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
@@ -1219,9 +1249,16 @@ async function startServer() {
       targetRole: 'students',
       targetStream: session.stream,
       read: false,
+      timestamp: notifTimestamp,
+      createdAt: new Date().toISOString(),
     };
     if (!db.notifications) db.notifications = [];
-    db.notifications.unshift(sessionNotif);
+    const existingNotif = db.notifications.find((n: any) => 
+      n.title === sessionNotif.title && n.message === sessionNotif.message
+    );
+    if (!existingNotif) {
+      db.notifications.unshift(sessionNotif);
+    }
 
     saveDatabase(db);
 
@@ -1501,7 +1538,11 @@ async function startServer() {
     if (!db) return res.status(500).json({ error: 'Database error' });
 
     const notif = req.body;
+    if (!notif.timestamp) notif.timestamp = Date.now();
+    if (!notif.createdAt) notif.createdAt = new Date().toISOString();
+
     if (!db.notifications) db.notifications = [];
+    db.notifications = db.notifications.filter((n: any) => n.id !== notif.id);
     db.notifications.unshift(notif);
     saveDatabase(db);
 

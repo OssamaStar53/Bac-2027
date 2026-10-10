@@ -288,6 +288,21 @@ export const TeacherSpace: React.FC<TeacherSpaceProps> = ({
     }, 1500);
   };
 
+  // Security Guard: Strictly protect Teacher Space against student access
+  if (currentUser?.role === 'student') {
+    return (
+      <div className="max-w-md mx-auto my-12 p-6 bg-white rounded-3xl border border-stone-200 text-center shadow-xs text-stone-800">
+        <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center mx-auto mb-3">
+          <ShieldAlert className="w-6 h-6" />
+        </div>
+        <h3 className="font-bold text-stone-900 text-base mb-1.5">فضاء خاص بالأساتذة المؤطرين والإدارة</h3>
+        <p className="text-stone-600 text-xs mb-4 leading-relaxed">
+          عذراً، هذا الفضاء مخصص حصرياً للأساتذة المتطوعين وإدارة الجمعية لإدارة الحصص ورصد الغياب ونشر المذكرات.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       

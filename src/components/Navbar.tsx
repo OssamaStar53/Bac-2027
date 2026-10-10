@@ -153,16 +153,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              <button
-                onClick={() => setActiveTab('teacher_space')}
-                className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-                  activeTab === 'teacher_space'
-                    ? 'text-emerald-800 font-bold bg-emerald-50'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
-                }`}
-              >
-                فضاء الأستاذ المتطوع
-              </button>
+              {/* Only show Teacher Space to Teachers and Admins */}
+              {(currentUser?.role === 'teacher' || currentUser?.role === 'association_admin') && (
+                <button
+                  onClick={() => setActiveTab('teacher_space')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+                    activeTab === 'teacher_space'
+                      ? 'text-emerald-800 font-bold bg-emerald-50'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
+                  }`}
+                >
+                  فضاء الأستاذ المتطوع
+                </button>
+              )}
 
               <button
                 onClick={() => setActiveTab('student_card')}
@@ -380,14 +383,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            <button
-              onClick={() => setActiveTab('teacher_space')}
-              className={`px-2.5 py-1 rounded-md whitespace-nowrap cursor-pointer ${
-                activeTab === 'teacher_space' ? 'bg-emerald-700 text-white font-medium' : 'text-stone-600 hover:bg-stone-100'
-              }`}
-            >
-              فضاء الأستاذ
-            </button>
+            {(currentUser?.role === 'teacher' || currentUser?.role === 'association_admin') && (
+              <button
+                onClick={() => setActiveTab('teacher_space')}
+                className={`px-2.5 py-1 rounded-md whitespace-nowrap cursor-pointer ${
+                  activeTab === 'teacher_space' ? 'bg-emerald-700 text-white font-medium' : 'text-stone-600 hover:bg-stone-100'
+                }`}
+              >
+                فضاء الأستاذ
+              </button>
+            )}
             
             <button
               onClick={() => setActiveTab('student_card')}

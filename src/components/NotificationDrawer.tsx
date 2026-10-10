@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { AppNotification } from '../types';
+import { AppNotification, AppUser } from '../types';
+import { sortNotificationsNewestFirst } from '../utils/notificationUtils';
 import { 
   X, 
   Bell, 
@@ -23,6 +24,7 @@ interface NotificationDrawerProps {
   notifications: AppNotification[];
   onMarkAllRead: () => void;
   onMarkRead: (id: string) => void;
+  currentUser?: AppUser | null;
 }
 
 export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
@@ -31,11 +33,14 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
   notifications,
   onMarkAllRead,
   onMarkRead,
+  currentUser,
 }) => {
   const [filter, setFilter] = useState<'all' | 'admin_registrations' | 'sessions'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const isAdmin = currentUser?.role === 'association_admin';
 
   const handleShare = (msg: string) => {
     const encoded = encodeURIComponent(msg);
@@ -54,17 +59,30 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
            notif.message.includes('تسجيل');
   };
 
-  const filteredNotifications = notifications.filter((notif) => {
-    if (filter === 'admin_registrations') {
-      return isRegistrationNotif(notif);
+  // Strictly filter: Registration notifications MUST ONLY be seen by administration!
+  const roleFilteredNotifications = notifications.filter((notif) => {
+    if (isRegistrationNotif(notif) || notif.targetRole === 'admins') {
+      return isAdmin;
     }
-    if (filter === 'sessions') {
-      return notif.type === 'session' || notif.title.includes('حصة') || notif.title.includes('اختبار');
+    if (notif.targetRole === 'teachers' && currentUser?.role !== 'teacher' && !isAdmin) {
+      return false;
     }
     return true;
   });
 
-  const adminRegistrationsCount = notifications.filter((n) => isRegistrationNotif(n) && !n.read).length;
+  const filteredNotifications = roleFilteredNotifications
+    .filter((notif) => {
+      if (filter === 'admin_registrations') {
+        return isAdmin && isRegistrationNotif(notif);
+      }
+      if (filter === 'sessions') {
+        return notif.type === 'session' || notif.title.includes('حصة') || notif.title.includes('اختبار');
+      }
+      return true;
+    })
+    .sort(sortNotificationsNewestFirst);
+
+  const adminRegistrationsCount = roleFilteredNotifications.filter((n) => isRegistrationNotif(n) && !n.read).length;
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-stone-900/40 backdrop-blur-xs flex justify-end">
@@ -119,28 +137,30 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
           </div>
 
           {/* Filter Tabs */}
-          <div className="grid grid-cols-3 gap-1 bg-stone-100 p-1 rounded-xl text-[11px] font-bold text-center">
+          <div className={`grid ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'} gap-1 bg-stone-100 p-1 rounded-xl text-[11px] font-bold text-center`}>
             <button
               onClick={() => setFilter('all')}
               className={`py-1.5 px-1 rounded-lg transition-all cursor-pointer truncate ${
                 filter === 'all' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
               }`}
             >
-              الكل ({notifications.length})
+              الكل ({roleFilteredNotifications.length})
             </button>
-            <button
-              onClick={() => setFilter('admin_registrations')}
-              className={`py-1.5 px-1 rounded-lg transition-all cursor-pointer truncate flex items-center justify-center gap-1 ${
-                filter === 'admin_registrations' ? 'bg-white text-amber-950 shadow-2xs font-black' : 'text-stone-600 hover:text-stone-900'
-              }`}
-            >
-              <span>تسجيلات جديدة</span>
-              {adminRegistrationsCount > 0 && (
-                <span className="bg-amber-600 text-white text-[9px] px-1 py-0.2 rounded-full">
-                  {adminRegistrationsCount}
-                </span>
-              )}
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setFilter('admin_registrations')}
+                className={`py-1.5 px-1 rounded-lg transition-all cursor-pointer truncate flex items-center justify-center gap-1 ${
+                  filter === 'admin_registrations' ? 'bg-white text-amber-950 shadow-2xs font-black' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                <span>تسجيلات جديدة</span>
+                {adminRegistrationsCount > 0 && (
+                  <span className="bg-amber-600 text-white text-[9px] px-1 py-0.2 rounded-full">
+                    {adminRegistrationsCount}
+                  </span>
+                )}
+              </button>
+            )}
             <button
               onClick={() => setFilter('sessions')}
               className={`py-1.5 px-1 rounded-lg transition-all cursor-pointer truncate ${
@@ -193,7 +213,14 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                       </span>
                     </div>
 
-                    <span className="font-mono text-[10px] text-stone-400 shrink-0">{notif.date}</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!notif.read && (
+                        <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 text-[9px] font-black rounded-md">
+                          جديد
+                        </span>
+                      )}
+                      <span className="font-mono text-[10px] text-stone-400">{notif.date}</span>
+                    </div>
                   </div>
 
                   {isAdminItem && (

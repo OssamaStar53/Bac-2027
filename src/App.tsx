@@ -45,7 +45,15 @@ import { ProfileSettingsModal } from './components/ProfileSettingsModal';
 import { BadhraLogo } from './components/BadhraLogo';
 import { api } from './api';
 import { playNotificationSound, triggerNativeBrowserNotification } from './utils/notificationSound';
+import { sortNotificationsNewestFirst } from './utils/notificationUtils';
 import { PhoneCall, MapPin, Mail, CheckCircle2, MessageSquare, ExternalLink, ShieldAlert, KeyRound, Lock, ArrowRight, AlertCircle, Bell, X } from 'lucide-react';
+
+// Helper to identify registration notifications that must be exclusively for administration
+const isRegistrationNotif = (notif: AppNotification): boolean => {
+  return notif.targetRole === 'admins' ||
+    (typeof notif.title === 'string' && (notif.title.includes('تسجيل تلميذ') || notif.title.includes('تسجيل أستاذ') || notif.title.includes('تسجيل'))) ||
+    (typeof notif.message === 'string' && (notif.message.includes('تسجيل تلميذ جديد') || notif.message.includes('تسجيل أستاذ متطوع')));
+};
 
 export default function App() {
   // Persistent Site Settings
@@ -60,9 +68,11 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_ADMIN_USER;
   });
 
-  // Legacy demo IDs filter helper to prevent resurrected demo accounts from old browser localStorage cache
+  // Legacy demo IDs filter helpers to prevent resurrected demo accounts from old browser localStorage cache
   const DEMO_STUDENT_IDS = new Set(['std-001', 'std-002', 'std-003', 'std-004', 'std-005', 'std-006', 'std-007']);
   const DEMO_TEACHER_IDS = new Set(['tch-001', 'tch-002', 'tch-003', 'tch-004']);
+  const DEMO_SESSION_IDS = new Set(['ses-101', 'ses-102', 'ses-103', 'ses-104']);
+  const DEMO_NOTIF_IDS = new Set(['notif-01', 'notif-02', 'notif-03', 'notif-04', 'notif-t-01', 'notif-t-02']);
 
   // Persistent state with localStorage fallbacks
   const [students, setStudents] = useState<Student[]>(() => {
@@ -89,7 +99,13 @@ export default function App() {
 
   const [sessions, setSessions] = useState<SupportSession[]>(() => {
     const saved = localStorage.getItem('badhra_sessions');
-    return saved ? JSON.parse(saved) : INITIAL_SESSIONS;
+    if (!saved) return INITIAL_SESSIONS;
+    try {
+      const parsed: SupportSession[] = JSON.parse(saved);
+      return parsed.filter(s => !DEMO_SESSION_IDS.has(s.id));
+    } catch {
+      return INITIAL_SESSIONS;
+    }
   });
 
   const [resources, setResources] = useState<StudyResource[]>(() => {
@@ -101,7 +117,15 @@ export default function App() {
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     const saved = localStorage.getItem('badhra_notifications');
-    return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
+    if (saved) {
+      try {
+        const parsed: AppNotification[] = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(n => !DEMO_NOTIF_IDS.has(n.id)).sort(sortNotificationsNewestFirst);
+        }
+      } catch (e) {}
+    }
+    return [...INITIAL_NOTIFICATIONS].filter(n => !DEMO_NOTIF_IDS.has(n.id)).sort(sortNotificationsNewestFirst);
   });
 
   const [quizSubmissions, setQuizSubmissions] = useState<QuizSubmission[]>(() => {
@@ -202,47 +226,47 @@ export default function App() {
         });
       }
 
-      // Merge sessions smartly so locally scheduled sessions are NEVER wiped on update
+      // Sync sessions from central server, excluding demo sessions
       if (Array.isArray(serverData.sessions)) {
-        setSessions((prev) => {
-          const merged = [...serverData.sessions];
-          for (const s of prev) {
-            if (!merged.some(m => m.id === s.id)) {
-              merged.push(s);
-              // Ensure server receives this locally retained session
-              api.addSession(s);
-            }
-          }
-          return merged;
-        });
+        const cleanServerSessions = serverData.sessions.filter((s: any) => !DEMO_SESSION_IDS.has(s.id));
+        setSessions(cleanServerSessions);
       }
 
-      // Merge notifications smartly and trigger live alert if new notification arrived
+      // Sync notifications from central server, excluding demo notifications
       if (Array.isArray(serverData.notifications)) {
-        const serverNotifs = serverData.notifications;
+        const cleanServerNotifs = serverData.notifications
+          .filter((n: any) => !DEMO_NOTIF_IDS.has(n.id))
+          .sort(sortNotificationsNewestFirst);
+
         setNotifications((prev) => {
           const prevIds = new Set(prev.map(n => n.id));
-          const newIncoming = serverNotifs.filter((n: any) => !prevIds.has(n.id));
+          const newIncoming = cleanServerNotifs.filter((n: any) => !prevIds.has(n.id));
 
           // If this is a live background sync on phone/PC and new notification arrived
           if (isLivePoll && newIncoming.length > 0) {
-            const latest = newIncoming[0];
-            setFloatingAlert(latest);
-            playNotificationSound();
-            triggerNativeBrowserNotification(latest.title, latest.message);
-            if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-              try { navigator.vibrate([200, 100, 200]); } catch {}
+            // ONLY trigger audio chime and floating banner if the current user is authorized to see it!
+            const authorizedIncoming = newIncoming.filter(n => {
+              if (isRegistrationNotif(n) || n.targetRole === 'admins') {
+                return currentUser?.role === 'association_admin';
+              }
+              if (n.targetRole === 'teachers') {
+                return currentUser?.role === 'teacher' || currentUser?.role === 'association_admin';
+              }
+              return true;
+            });
+
+            if (authorizedIncoming.length > 0) {
+              const latest = authorizedIncoming[0];
+              setFloatingAlert(latest);
+              playNotificationSound();
+              triggerNativeBrowserNotification(latest.title, latest.message);
+              if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+                try { navigator.vibrate([200, 100, 200]); } catch {}
+              }
             }
           }
 
-          const merged = [...serverNotifs];
-          for (const n of prev) {
-            if (!merged.some(m => m.id === n.id)) {
-              merged.push(n);
-              api.addNotification(n);
-            }
-          }
-          return merged;
+          return cleanServerNotifs;
         });
       }
 
@@ -250,7 +274,7 @@ export default function App() {
     } catch (e) {
       // Offline fallback
     }
-  }, [DEMO_STUDENT_IDS, DEMO_TEACHER_IDS]);
+  }, [DEMO_STUDENT_IDS, DEMO_TEACHER_IDS, DEMO_SESSION_IDS, DEMO_NOTIF_IDS, currentUser]);
 
   // Initial Sync & Live Background Polling (enables instant mobile sync with desktop)
   useEffect(() => {
@@ -326,6 +350,13 @@ export default function App() {
       localStorage.removeItem('badhra_current_user');
     }
   }, [currentUser]);
+
+  // Redirect students if they ever attempt to navigate to teacher_space
+  useEffect(() => {
+    if (currentUser?.role === 'student' && activeTab === 'teacher_space') {
+      setActiveTab('student_card');
+    }
+  }, [currentUser, activeTab]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -501,23 +532,28 @@ export default function App() {
       setCurrentUser(autoUser);
     }
 
-    // 1. Mandatory Admin Notification in in-app notification center
+    // 1. Mandatory Admin Notification in in-app notification center (Admins ONLY)
+    const notifTimestamp = Date.now();
     const adminNotif: AppNotification = {
-      id: `notif-std-${Date.now()}`,
+      id: `notif-std-${notifTimestamp}`,
       title: 'تسجيل تلميذ جديد 🎓',
       message: `تم تسجيل تلميذ جديد: ${newStudent.fullName} | الهاتف: ${newStudent.phone || '–'} | البريد: ${newStudent.email || '–'}`,
       date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
       type: 'general',
       targetRole: 'admins',
       read: false,
+      timestamp: notifTimestamp,
+      createdAt: new Date().toISOString(),
     };
-    setNotifications((prev) => [adminNotif, ...prev]);
+    setNotifications((prev) => [adminNotif, ...prev].sort(sortNotificationsNewestFirst));
     api.addNotification(adminNotif);
-    setFloatingAlert(adminNotif);
 
-    // Play instant audio chime and trigger native notification on phone & PC
-    playNotificationSound();
-    triggerNativeBrowserNotification(adminNotif.title, adminNotif.message);
+    // Play instant audio chime and show alert banner ONLY if currently logged in as admin
+    if (currentUser?.role === 'association_admin') {
+      setFloatingAlert(adminNotif);
+      playNotificationSound();
+      triggerNativeBrowserNotification(adminNotif.title, adminNotif.message);
+    }
 
     // 2. Activity Log
     addActivityLog(
@@ -564,23 +600,28 @@ export default function App() {
     setCurrentUser(newUser);
     api.addTeacher(newTeacher);
 
-    // 1. Mandatory Admin Notification in in-app notification center
+    // 1. Mandatory Admin Notification in in-app notification center (Admins ONLY)
+    const notifTimestamp = Date.now();
     const adminNotif: AppNotification = {
-      id: `notif-tch-${Date.now()}`,
+      id: `notif-tch-${notifTimestamp}`,
       title: 'تسجيل أستاذ جديد 👨‍🏫',
       message: `تم تسجيل أستاذ متطوع جديد: ${newTeacher.fullName} | الهاتف: ${newTeacher.phone || '–'} | البريد: ${newTeacher.email || '–'}`,
       date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
       type: 'general',
       targetRole: 'admins',
       read: false,
+      timestamp: notifTimestamp,
+      createdAt: new Date().toISOString(),
     };
-    setNotifications((prev) => [adminNotif, ...prev]);
+    setNotifications((prev) => [adminNotif, ...prev].sort(sortNotificationsNewestFirst));
     api.addNotification(adminNotif);
-    setFloatingAlert(adminNotif);
 
-    // Play instant audio chime and trigger native notification on phone & PC
-    playNotificationSound();
-    triggerNativeBrowserNotification(adminNotif.title, adminNotif.message);
+    // Play instant audio chime and show alert banner ONLY if currently logged in as admin
+    if (currentUser?.role === 'association_admin') {
+      setFloatingAlert(adminNotif);
+      playNotificationSound();
+      triggerNativeBrowserNotification(adminNotif.title, adminNotif.message);
+    }
 
     // 2. Activity Log
     addActivityLog(
@@ -624,8 +665,9 @@ export default function App() {
     api.addSession(newSession);
 
     // Create an automatic notification for this session
+    const notifTimestamp = Date.now();
     const notif: AppNotification = {
-      id: `notif-${Date.now().toString().slice(-4)}`,
+      id: `notif-ses-${notifTimestamp}`,
       title: `حصة دعم جديدة: ${newSession.subject}`,
       message: `🔔 تذكير: حصة ${newSession.subject} (${newSession.title}) يوم ${newSession.timeText} بـ ${newSession.location}.`,
       date: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
@@ -633,8 +675,10 @@ export default function App() {
       targetRole: 'students',
       targetStream: newSession.stream,
       read: false,
+      timestamp: notifTimestamp,
+      createdAt: new Date().toISOString(),
     };
-    setNotifications((prev) => [notif, ...prev]);
+    setNotifications((prev) => [notif, ...prev].sort(sortNotificationsNewestFirst));
     api.addNotification(notif);
     setFloatingAlert(notif);
 
@@ -957,8 +1001,24 @@ export default function App() {
     showToast(`تم نشر الاختبار بنجاح: ${newQuiz.title}`);
   };
 
-  // Notifications
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  // Role-based notification visibility: registration alerts strictly for Admins ONLY
+  const visibleNotifications = React.useMemo(() => {
+    const isAdmin = currentUser?.role === 'association_admin';
+    const isTeacher = currentUser?.role === 'teacher';
+    return notifications
+      .filter((notif) => {
+        if (isRegistrationNotif(notif) || notif.targetRole === 'admins') {
+          return isAdmin;
+        }
+        if (notif.targetRole === 'teachers') {
+          return isTeacher || isAdmin;
+        }
+        return true;
+      })
+      .sort(sortNotificationsNewestFirst);
+  }, [notifications, currentUser]);
+
+  const unreadCount = visibleNotifications.filter((n) => !n.read).length;
 
   const handleMarkAllRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
@@ -1046,6 +1106,7 @@ export default function App() {
             siteSettings={siteSettings}
             onOpenTeacherSpace={() => setActiveTab('teacher_space')}
             onOpenRegister={() => setIsRegisterOpen(true)}
+            onOpenRegisterTeacher={() => setIsTeacherRegisterOpen(true)}
             onOpenAuth={() => setIsAuthModalOpen(true)}
             onAddSession={handleAddSession}
             onDeleteSession={handleDeleteSession}
@@ -1181,24 +1242,42 @@ export default function App() {
         )}
 
         {activeTab === 'teacher_space' && (
-          <TeacherSpace
-            teachers={teachers}
-            sessions={sessions}
-            students={students}
-            notifications={notifications}
-            loggedInTeacherId={currentUser?.role === 'teacher' ? currentUser.relatedId : undefined}
-            currentUser={currentUser}
-            onOpenAuth={() => setIsAuthModalOpen(true)}
-            onAddSession={handleAddSession}
-            onUpdateAttendance={handleUpdateAttendance}
-            onAddResource={handleAddResource}
-            onAddQuiz={handleAddQuiz}
-            resources={resources}
-            onDeleteSession={handleDeleteSession}
-            onToggleHideSession={handleToggleHideSession}
-            onDeleteResource={handleDeleteResource}
-            onToggleHideResource={handleToggleHideResource}
-          />
+          (currentUser?.role === 'teacher' || currentUser?.role === 'association_admin') ? (
+            <TeacherSpace
+              teachers={teachers}
+              sessions={sessions}
+              students={students}
+              notifications={visibleNotifications}
+              loggedInTeacherId={currentUser?.role === 'teacher' ? currentUser.relatedId : undefined}
+              currentUser={currentUser}
+              onOpenAuth={() => setIsAuthModalOpen(true)}
+              onAddSession={handleAddSession}
+              onUpdateAttendance={handleUpdateAttendance}
+              onAddResource={handleAddResource}
+              onAddQuiz={handleAddQuiz}
+              resources={resources}
+              onDeleteSession={handleDeleteSession}
+              onToggleHideSession={handleToggleHideSession}
+              onDeleteResource={handleDeleteResource}
+              onToggleHideResource={handleToggleHideResource}
+            />
+          ) : (
+            <div className="max-w-md mx-auto my-12 p-6 bg-white rounded-3xl border border-stone-200 text-center shadow-xs text-stone-800">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center mx-auto mb-3">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-stone-900 text-base mb-1.5">فضاء خاص بالأساتذة المؤطرين والإدارة</h3>
+              <p className="text-stone-600 text-xs mb-4 leading-relaxed">
+                عذراً، هذا الفضاء مخصص حصرياً للأساتذة المتطوعين وإدارة الجمعية لإدارة الحصص ورصد الغياب ونشر المذكرات.
+              </p>
+              <button
+                onClick={() => setActiveTab('schedule')}
+                className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                العودة لبرنامج الحصص
+              </button>
+            </div>
+          )
         )}
 
         {activeTab === 'student_card' && (
@@ -1299,9 +1378,10 @@ export default function App() {
       <NotificationDrawer
         isOpen={isNotificationDrawerOpen}
         onClose={() => setIsNotificationDrawerOpen(false)}
-        notifications={notifications}
+        notifications={visibleNotifications}
         onMarkAllRead={handleMarkAllRead}
         onMarkRead={handleMarkRead}
+        currentUser={currentUser}
       />
 
       {/* Dynamic Customizable Footer */}
